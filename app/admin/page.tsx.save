@@ -1,0 +1,494 @@
+"use client";
+
+import { useEffect, useState, useRef } from "react";
+import {
+  collection,
+  onSnapshot,
+  addDoc,
+  deleteDoc,
+  doc,
+  updateDoc,
+} from "firebase/firestore";
+import { db, storage } from "@/firebase/config";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+
+// ✅ CHART FIX
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend,
+} from "chart.js";
+
+import { Bar } from "react-chartjs-2";
+
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend
+);
+
+export default function AdminPage() {
+  const [orders, setOrders] = useState<any[]>([]);
+  const [foods, setFoods] = useState<any[]>([]);
+  const [view, setView] = useState("dashboard");
+  const [selectedOrder, setSelectedOrder] = useState<any>(null);
+  const [filter, setFilter] = useState("all");
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // 🔔 Sound
+  useEffect(() => {
+    audioRef.current = new Audio("/mixkit-urgent-simple-tone-loop-2976.wav");
+  }, []);
+
+  // 🔥 Orders realtime + sound
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "orders"), (snap) => {
+      const newOrders = snap.docs.map((d) => ({
+        id: d.id,
+        ...d.data(),
+      }));
+
+      if (newOrders.length > orders.length) {
+        audioRef.current?.play();
+      }
+
+      setOrders(newOrders);
+    });
+
+    return () => unsub();
+  }, [orders]);
+
+  // 🍔 Foods realtime
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "foods"), (snap) => {
+      setFoods(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    });
+    return () => unsub();
+  }, []);
+
+  // 📊 Chart Data
+  const chartData = {
+    labels: orders.map((_, i) => "Order " + (i + 1)),
+    datasets: [
+      {
+        label: "Sales ₹",
+        data: orders.map((o) => o.total || 0),
+      },
+    ],
+  };
+
+  // ➕ Add Food with Image
+  const addFood = async (file: File, data: any) => {
+    const storageRef = ref(storage, "foods/" + file.name);
+    await uploadBytes(storageRef, file);
+    const url = await getDownloadURL(storageRef);
+
+    await addDoc(collection(db, "foods"), {
+      ...data,
+  {/* 📦 ORDERS */}
+{view === "orders" && (
+  <div>
+    <h2 className="font-bold mb-3">📦 Live Orders</h2>
+
+    {/* 🔥 Latest First */}
+    {orders
+      .sort((a, b) => b.orderNumber - a.orderNumber)
+      .map((o) => (
+        <div key={o.id} className="bg-white p-3 mb-3 rounded shadow">
+
+          {/* 🆔 Order ID */}
+          <p className="font-bold">Order ID: #{o.orderNumber}</p>
+
+          {/* ⏱️ Time */}
+          <p className="text-sm text-gray-500">
+            {new Date(o.createdAt?.seconds * 1000).toLocaleString()}
+          </p>
+
+          {/* 💰 Total */}
+          <p>Total: ₹{o.total}</p>
+
+          {/* 📦 Status */}
+          <p>Status: <span className="font-semibold">{o.status}</span></p>
+
+          {/* 👁️ View */}
+          <button
+            onClick={() => setSelectedOrder(o)}
+            className="text-blue-500 mt-2"
+          >
+            View Details
+          </button>
+
+          {/* ✅ Actions */}
+          <div className="mt-2 flex gap-2">
+            <button
+              onClick={() => updateDoc(doc(db, "orders", o.id), { status: "accepted" })}
+              className="bg-green-500 text-white px-2 py-1 rounded"
+            >
+              Accept
+            </button>
+
+            <button
+              onClick={() => updateDoc(doc(db, "orders", o.id), { status: "preparing" })}
+              className="bg-yellow-500 text-white px-2 py-1 rounded"
+            >
+              Preparing
+            </button>
+
+            <button
+              onClick={() => updateDoc(doc(db, "orders", o.id), { status: "delivered" })}
+              className="bg-blue-500 text-white px-2 py-1 rounded"
+            >
+              Delivered
+            </button>
+          </div>
+        </div>
+      ))}
+
+    {/* 📦 ORDER DETAILS POPUP */}
+    {selectedOrder && (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center">
+        <div className="bg-white p-4 rounded w-80">
+
+          <h2 className="font-bold mb-2">
+            Order #{selectedOrder.orderNumber}
+          </h2>
+
+          {/* ⏱️ Time */}
+          <p className="text-sm mb-2">
+            {new Date(selectedOrder.createdAt?.seconds * 1000).toLocaleString()}
+          </p>
+
+          {/* 🧾 Items */}
+          <div className="mb-2">
+            <p className="font-semibold">Items:</p>
+
+            {selectedOrder.items?.map((i: any, idx: number) => (
+              <p key={idx}>
+                {i.name} x {i.qty}
+              </p>
+            ))}
+          </div>
+
+          {/* 💰 Total */}
+          <p>Total: ₹{selectedOrder.total}</p>
+
+          {/* 📍 Address */}
+          <p>Address: {selectedOrder.address}</p>
+
+          {/* 🚴 Rider Assign */}
+          <div className="mt-3">
+            <input
+              placeholder="Rider Name"
+              onChange={(e) =>
+                setSelectedOrder({
+                  ...selectedOrder,
+                  riderName: e.target.value,
+                })
+              }
+              className="border p-1 mb-2 w-full"
+            />
+
+            <input
+              placeholder="Rider Phone"
+              onChange={(e) =>
+                setSelectedOrder({
+                  ...selectedOrder,
+                  riderPhone: e.target.value,
+                })
+              }
+              className="border p-1 mb-2 w-full"
+            />
+
+            <button
+              onClick={async () => {
+                await updateDoc(doc(db, "orders", selectedOrder.id), {
+                  riderName: selectedOrder.riderName,
+                  riderPhone: selectedOrder.riderPhone,
+                  status: "out for delivery",
+                });
+                setSelectedOrder(null);
+              }}
+              className="bg-green-500 text-white px-3 py-1 rounded w-full"
+            >
+              Assign Rider
+            </button>
+          </div>
+
+          {/* 📞 Call Rider */}
+          {selectedOrder.riderPhone && (
+            <a
+              href={`tel:${selectedOrder.riderPhone}`}
+              className="block mt-2 text-center bg-blue-500 text-white py-1 rounded"
+            >
+              📞 Call Rider
+            </a>
+          )}
+
+          <button
+            onClick={() => setSelectedOrder(null)}
+            className="mt-3 text-red-500 w-full"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    )}
+  </div>
+)}   image: url,
+      createdAt: new Date(),
+    });
+  };
+
+  // ✏️ Update
+  const updateFood = async (id: string, data: any) => {
+    await updateDoc(doc(db, "foods", id), data);
+    setEditingId(null);
+  };
+
+  return (
+    <div className="p-4">
+
+      <h1 className="text-xl font-bold mb-4">🍔 Admin Panel</h1>
+
+      {/* MENU */}
+      <div className="flex gap-2 mb-4">
+        <button onClick={() => setView("dashboard")}>Dashboard</button>
+        <button onClick={() => setView("orders")}>Orders</button>
+        <button onClick={() => setView("menu")}>Menu</button>
+      </div>
+
+      {/* 📈 DASHBOARD */}
+      {view === "dashboard" && (
+        <div>
+          <Bar data={chartData} />
+        </div>
+      )}
+
+      {/* 📦 ORDERS */}
+{view === "orders" && (
+  <div>
+    <h2 className="font-bold mb-3">📦 Live Orders</h2>
+
+    {/* 🔥 Latest First */}
+    {orders
+      .sort((a, b) => b.orderNumber - a.orderNumber)
+      .map((o) => (
+        <div key={o.id} className="bg-white p-3 mb-3 rounded shadow">
+
+          {/* 🆔 Order ID */}
+          <p className="font-bold">Order ID: #{o.orderNumber}</p>
+
+          {/* ⏱️ Time */}
+          <p className="text-sm text-gray-500">
+            {new Date(o.createdAt?.seconds * 1000).toLocaleString()}
+          </p>
+
+          {/* 💰 Total */}
+          <p>Total: ₹{o.total}</p>
+
+          {/* 📦 Status */}
+          <p>Status: <span className="font-semibold">{o.status}</span></p>
+
+          {/* 👁️ View */}
+          <button
+            onClick={() => setSelectedOrder(o)}
+            className="text-blue-500 mt-2"
+          >
+            View Details
+          </button>
+
+          {/* ✅ Actions */}
+          <div className="mt-2 flex gap-2">
+            <button
+              onClick={() => updateDoc(doc(db, "orders", o.id), { status: "accepted" })}
+              className="bg-green-500 text-white px-2 py-1 rounded"
+            >
+              Accept
+            </button>
+
+            <button
+              onClick={() => updateDoc(doc(db, "orders", o.id), { status: "preparing" })}
+              className="bg-yellow-500 text-white px-2 py-1 rounded"
+            >
+              Preparing
+            </button>
+
+            <button
+              onClick={() => updateDoc(doc(db, "orders", o.id), { status: "delivered" })}
+              className="bg-blue-500 text-white px-2 py-1 rounded"
+            >
+              Delivered
+            </button>
+          </div>
+        </div>
+      ))}
+
+    {/* 📦 ORDER DETAILS POPUP */}
+    {selectedOrder && (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center">
+        <div className="bg-white p-4 rounded w-80">
+
+          <h2 className="font-bold mb-2">
+            Order #{selectedOrder.orderNumber}
+          </h2>
+
+          {/* ⏱️ Time */}
+          <p className="text-sm mb-2">
+            {new Date(selectedOrder.createdAt?.seconds * 1000).toLocaleString()}
+          </p>
+
+          {/* 🧾 Items */}
+          <div className="mb-2">
+            <p className="font-semibold">Items:</p>
+
+            {selectedOrder.items?.map((i: any, idx: number) => (
+              <p key={idx}>
+                {i.name} x {i.qty}
+              </p>
+            ))}
+          </div>
+
+          {/* 💰 Total */}
+          <p>Total: ₹{selectedOrder.total}</p>
+
+          {/* 📍 Address */}
+          <p>Address: {selectedOrder.address}</p>
+
+          {/* 🚴 Rider Assign */}
+          <div className="mt-3">
+            <input
+              placeholder="Rider Name"
+              onChange={(e) =>
+                setSelectedOrder({
+                  ...selectedOrder,
+                  riderName: e.target.value,
+                })
+              }
+              className="border p-1 mb-2 w-full"
+            />
+
+            <input
+              placeholder="Rider Phone"
+              onChange={(e) =>
+                setSelectedOrder({
+                  ...selectedOrder,
+                  riderPhone: e.target.value,
+                })
+              }
+              className="border p-1 mb-2 w-full"
+            />
+
+            <button
+              onClick={async () => {
+                await updateDoc(doc(db, "orders", selectedOrder.id), {
+                  riderName: selectedOrder.riderName,
+                  riderPhone: selectedOrder.riderPhone,
+                  status: "out for delivery",
+                });
+                setSelectedOrder(null);
+              }}
+              className="bg-green-500 text-white px-3 py-1 rounded w-full"
+            >
+              Assign Rider
+            </button>
+          </div>
+
+          {/* 📞 Call Rider */}
+          {selectedOrder.riderPhone && (
+            <a
+              href={`tel:${selectedOrder.riderPhone}`}
+              className="block mt-2 text-center bg-blue-500 text-white py-1 rounded"
+            >
+              📞 Call Rider
+            </a>
+          )}
+
+          <button
+            onClick={() => setSelectedOrder(null)}
+            className="mt-3 text-red-500 w-full"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    )}
+  </div>
+)}
+
+          {/* 📦 POPUP */}
+          {selectedOrder && (
+            <div className="fixed top-0 left-0 w-full h-full bg-black/50 flex justify-center items-center">
+              <div className="bg-white p-4">
+                <h2>Order Details</h2>
+                <p>Total: ₹{selectedOrder.total}</p>
+                <p>Address: {selectedOrder.address}</p>
+
+                {selectedOrder.items?.map((i: any, idx: number) => (
+                  <p key={idx}>{i.name} x {i.qty}</p>
+                ))}
+
+                <button onClick={() => setSelectedOrder(null)}>
+                  Close
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 🍔 MENU */}
+      {view === "menu" && (
+        <div>
+
+          {/* FILTER */}
+          <div className="flex gap-2 mb-3">
+            {["all", "snacks", "sweets", "drinks"].map((c) => (
+              <button key={c} onClick={() => setFilter(c)}>
+                {c}
+              </button>
+            ))}
+          </div>
+
+          {/* UPLOAD */}
+          <input type="file" id="file" />
+
+          <button
+            onClick={() => {
+              const file = (document.getElementById("file") as any).files[0];
+              addFood(file, { name: "Item", price: 100 });
+            }}
+          >
+            Upload Item
+          </button>
+
+          {foods
+            .filter((f) => filter === "all" || f.category === filter)
+            .map((f) => (
+              <div key={f.id} className="border p-2 mb-2 flex gap-2">
+                <img src={f.image} width={50} />
+
+                <div>
+                  <p>{f.name}</p>
+                  <p>₹{f.price}</p>
+                </div>
+
+                <button onClick={() => deleteDoc(doc(db, "foods", f.id))}>
+                  Delete
+                </button>
+              </div>
+            ))}
+        </div>
+      )}
+
+    </div>
+  );
+}

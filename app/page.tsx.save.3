@@ -1,0 +1,225 @@
+"use client";
+import { useEffect, useState } from "react";
+import { collection, getDocs } from "firebase/firestore";
+import { db } from "../firebase/config";
+import { motion, AnimatePresence } from "framer-motion";
+import { MapPin, Search, ShoppingBag, User, X, Plus, ChevronRight, Star, Clock, Home, Package } from "lucide-react";
+import { useRouter } from "next/navigation";
+
+export default function HomePage() {
+  const router = useRouter();
+  const [items, setItems] = useState<any[]>([]);
+  const [ads, setAds] = useState<any[]>([]);
+  const [filter, setFilter] = useState("All");
+  const [search, setSearch] = useState("");
+  const [currentAd, setCurrentAd] = useState(0);
+  const [cart, setCart] = useState<any[]>([]);
+
+  const [isLoginOpen, setIsLoginOpen] = useState(false);
+  const [isLocationOpen, setIsLocationOpen] = useState(false);
+  const [showAddressForm, setShowAddressForm] = useState(false);
+  const [user, setUser] = useState<any>(null);
+  const [address, setAddress] = useState("Detecting precise location...");
+  const [manualAddress, setManualAddress] = useState({ flat: "", area: "" });
+  const [loginForm, setLoginForm] = useState({ name: "", phone: "" });
+
+  const normalize = (str: string) => str?.toLowerCase().replace(/\s/g, "");
+
+  useEffect(() => {
+    const fetchData = async () => {
+      const menuSnap = await getDocs(collection(db, "menus"));
+      const adsSnap = await getDocs(collection(db, "ads"));
+      setItems(menuSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
+      setAds(adsSnap.docs.map((doc) => doc.data()));
+    };
+    fetchData();
+    const savedUser = localStorage.getItem("rk_user");
+    if (savedUser) setUser(JSON.parse(savedUser));
+    detectRealLocation();
+  }, []);
+
+  // HIGH ACCURACY LOCATION FIX
+  const detectRealLocation = () => {
+    if (navigator.geolocation) {
+      setAddress("Accessing GPS...");
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          const { latitude, longitude } = position.coords;
+          try {
+            // Using zoom=18 for house-level precision
+            const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`);
+            const data = await res.json();
+            const a = data.address;
+            
+            // Priority based address string
+            const gali = a.road || a.suburb || a.neighbourhood || a.block || "";
+            const area = a.city_district || a.town || a.village || "";
+            const dist = a.state_district || a.city || "";
+            const code = a.postcode || "";
+
+            const finalAddr = `${gali}${gali ? ', ' : ''}${area}${area ? ', ' : ''}${dist} ${code}`;
+            setAddress(finalAddr || "Location Found");
+          } catch (err) {
+            setAddress("Address Fetch Error");
+          }
+        },
+        () => setAddress("Please enable GPS for G-Block delivery"),
+        { 
+          enableHighAccuracy: true, // Forces phone to use GPS, not just Tower/WiFi
+          timeout: 10000, 
+          maximumAge: 0 
+        }
+      );
+    }
+  };
+
+  useEffect(() => {
+    if (ads.length === 0) return;
+    const interval = setInterval(() => setCurrentAd((prev) => (prev + 1) % ads.length), 5000);
+    return () => clearInterval(interval);
+  }, [ads]);
+
+  const total = cart.reduce((sum, item) => sum + (Number(item.price) - (Number(item.price) * (Number(item.discount) || 0)) / 100) * item.qty, 0);
+
+  return (
+    <div className="bg-slate-50 min-h-screen pb-24 font-sans select-none overflow-x-hidden">
+      
+      {/* HEADER */}
+      <div className="sticky top-0 z-50 bg-gradient-to-r from-red-600 to-orange-500 p-3 shadow-md">
+        <div className="max-w-6xl mx-auto flex items-center justify-between gap-4">
+          <div className="w-40 md:w-52 shrink-0">
+            <h1 className="text-2xl md:text-3xl font-black text-white italic tracking-tighter leading-none">RamKesar</h1>
+            <p className="text-[10px] md:text-xs text-white font-bold italic opacity-100 mt-1" style={{ fontFamily: 'cursive' }}>Swad Jo Dil Jeet Le</p>
+          </div>
+
+          <div className="relative flex-1 max-w-md hidden md:block">
+            <Search className="absolute left-3 top-2.5 text-gray-400" size={16} />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search for food..." className="w-full pl-10 pr-3 py-2 rounded-full text-sm outline-none text-black bg-white" />
+          </div>
+
+          <button onClick={() => setIsLoginOpen(true)} className="flex items-center gap-2 bg-white/20 px-4 py-2 rounded-full text-white border border-white/10 active:scale-95 transition-all">
+            <User size={18} />
+            {user && <span className="text-xs font-black uppercase tracking-tight">{user.name.split(' ')[0]}</span>}
+          </button>
+        </div>
+        <div className="relative mt-3 md:hidden">
+            <Search className="absolute left-3 top-2.5 text-gray-400" size={14}            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search dishes..." className="w-full pl-10 pr-3 py-2 rounded-xl text-xs outline-none text-black bg-white shadow-inner" />
+        </div>
+      </div>
+
+      <div className="max-w-6xl mx-auto">
+        
+        {/* LOCATION BOX (Precise) */}
+        <div onClick={() => setIsLocationOpen(true)} className="bg-white p-3 px-4 flex items-center gap-2 border-b cursor-pointer sticky top-[115px] md:top-[75px] z-40 border-t border-gray-50">
+          <MapPin size={16} className="text-red-600 shrink-0 animate-bounce" />
+          <div className="flex-1 overflow-hidden">
+            <p className="text-[11px] font-bold text-gray-800 truncate">{address}</p>
+          </div>
+          <ChevronRight size={14} className="text-gray-400" />
+        </div>
+
+        {/* SWIPEABLE ADS */}
+        <div className="p-2 md:p-4 overflow-hidden relative">
+          <motion.div className="flex cursor-grab active:cursor-grabbing" drag="x" dragConstraints={{ left: 0, right: 0 }}
+            onDragEnd={(e, info) => {
+              if (info.offset.x < -50) setCurrentAd((prev) => (prev + 1) % ads.length);
+              if (info.offset.x > 50) setCurrentAd((prev) => (prev === 0 ? ads.length - 1 : prev - 1));
+            }}
+            animate={{ x: `-${currentAd * 100}%` }}
+            transition={{ type: "spring", stiffness: 200, damping: 25 }}
+          >
+            {ads.map((ad, i) => (
+              <div key={i} className="w-full shrink-0 px-1 md:px-2">
+                <img src={ad.image} className="w-full h-40 md:h-72 object-cover rounded-2xl shadow-sm" alt="Offer" />
+              </div>
+            ))}
+          </motion.div>
+        </div>
+
+        {/* CATEGORIES */}
+        <div className="flex gap-2 px-4 py-2 overflow-x-auto no-scrollbar">
+          {["All", "Snacks", "Sweets", "Drinks", "TopRated"].map((f) => (
+            <button key={f} onClick={() => setFilter(f)} className={`px-5 py-2 rounded-full text-[10px] md:text-xs font-black transition-all ${filter === f ? "bg-red-600 text-white shadow-md" : "bg-white border text-gray-500"}`}>
+              {f}
+            </button>
+          ))}
+        </div>
+
+        {/* ITEMS GRID */}
+        <div className="px-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 mt-4">
+          {items.filter(i => (filter === "All" || normalize(i.category) === normalize(filter)) && normalize(i.name).includes(normalize(search))).map((item) => {
+            const cartItem = cart.find((i) => i.id === item.id);
+            const discountPercent = Number(item.discount) || 0;
+            const final = Math.round(Number(item.price) - (Number(item.price) * discountPercent) / 100);
+            
+            return (
+              <div key={item.id} className="bg-white rounded-2xl border border-gray-100 overflow-hidden flex flex-col hover:shadow-lg transition-all">
+                <div className="relative">
+                  <img src={item.image} className="w-full h-44 md:h-52 object-cover" alt="" />
+                  
+                  {/* REAL DATA % OFF BADGE (Top Left) */}
+                  {discountPercent > 0 && (
+                    <div className="absolute top-2 left-2 bg-red-600 text-white text-[10px] font-black px-2 py-1 rounded-lg shadow-xl border border-white/20">
+                      {discountPercent}% OFF
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-3 flex-1 flex flex-col">
+                  <h3 className="font-bold text-xs md:text-sm truncate">{item.name}</h3>
+                  <p className="text-[10px] text-gray-400 line-clamp-2 my-1 h-7 leading-tight">{item.description}</p>
+                  <div className="flex items-center gap-3 text-[10px] font-bold text-gray-500 mt-1">
+                    <span className="flex items-center gap-0.5 text-orange-500"><Star size={10} fill="currentColor"/> {item.rating}</span>
+                    <span className="flex items-center gap-0.5"><Clock size={10}/> {item.time}m</span>
+                  </div>
+                  <div className="flex justify-between items-center mt-3 pt-2 border-t">
+                    <div className="flex flex-col">
+                        <span className="font-black text-sm md:text-base">₹{final}</span>
+                        {discountPercent > 0 && <span className="text-[9px] text-gray-400 line-through">₹{item.price}</span>}
+                    </div>
+                    {cartItem ? (
+                      <div className="flex items-center gap-2 bg-red-600 text-white px-2 py-1 rounded-lg shadow-md">
+                        <button onClick={() => setCart(prev => prev.map(i => i.id === item.id ? {...i, qty: i.qty - 1} : i).filter(i => i.qty > 0))} className="font-bold">-</button>
+                        <span className="text-[10px] font-black">{cartItem.qty}</span>
+                        <button onClick={() => setCart(prev => prev.map(i => i.id === item.id ? {...i, qty: i.qty + 1} : i))} className="font-bold">+</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => setCart([...cart, {...item, qty: 1}])} className="bg-orange-500 text-white px-4 py-1.5 rounded-lg text-[10px] font-black shadow-sm active:scale-90">ADD</button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* FOOTER */}
+      <footer className="mt-12 py-10 text-center bg-white border-t">
+        <p className="text-sm font-black text-gray-500">Copyright © 2026 <span className="text-red-600 italic">RamKesar</span>. All Rights Reserved.</p>
+      </footer>
+
+      {/* COMPACT CART OVERLAY */}
+      {cart.length > 0 && (
+        <div onClick={() => router.push("/cart")} className="fixed bottom-20 left-4 right-4 bg-black text-white p-3 rounded-2xl shadow-2xl z-[60] flex justify-between items-center max-w-md mx-auto cursor-pointer border border-white/10 active:scale-95 transition-transform">
+          <div className="flex items-center gap-3">
+             <div className="bg-red-600 p-2 rounded-lg shadow-lg animate-pulse"><ShoppingBag size={18}/></div>
+             <div className="flex flex-col">
+               <span className="text-[9px] font-black text-gray-400 leading-none mb-1 uppercase tracking-tighter">{cart.length} ITEMS</span>
+               <span className="font-black text-base leading-none">₹{Math.round(total)}</span>
+             </div>
+          </div>
+          <button className="text-[11px] font-black bg-white text-black px-6 py-2 rounded-xl">CHECKOUT <ChevronRight size={12} className="inline ml-1"/></button>
+        </div>
+      )}
+
+      {/* BOTTOM NAV */}
+      <div className="fixed bottom-0 w-full bg-white border-t flex justify-around items-center h-14 z-[60] shadow-xl">
+        <button onClick={() => router.push("/")} className="text-red-600 flex flex-col items-center gap-0.5"><Home size={20}/><span className="text-[8px] font-bold uppercase">Home</span></button>
+        <button onClick={() => router.push("/orders")} className="text-gray-400 flex flex-col items-center gap-1 active:scale-110 transition-transform"><Package size={20}/><span className="text-[8px] font-bold uppercase">Orders</span></button>
+        <button onClick={() => setIsLoginOpen(true)} className="text-gray-400 flex flex-col items-center gap-1 active:scale-110 transition-transform"><User size={20}/><span className="text-[8px] font-bold uppercase">Profile</span></button>
+      </div>
+
+    </div>
+  );
+}

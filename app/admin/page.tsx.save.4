@@ -1,0 +1,755 @@
+use client";
+import { useEffect, useState, useMemo } from "react";
+import { db } from "@/firebase/config";
+import { 
+  collection, onSnapshot, query, orderBy, updateDoc, doc, 
+  addDoc, deleteDoc, Timestamp 
+} from "firebase/firestore";
+import { 
+  LayoutDashboard, ShoppingCart, UtensilsCrossed, Users, 
+  TrendingUp, Clock, CheckCircle2, XCircle, Bike, 
+  Search, Bell, LogOut, Plus, Edit3, Trash2, 
+  Phone, Settings, Monitor, Power, Image as ImageIcon,
+  Volume2, VolumeX, ChevronRight, Activity, ShieldCheck, Moon, Sun, AlertTriangle, Printer, FileText
+} from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+
+export default function AdminDashboard() {
+  const [activeTab, setActiveTab] = useState("dashboard");
+  const [orders, setOrders] = useState<any[]>([]);
+  const [menuItems, setMenuItems] = useState<any[]>([]);
+  const [riders, setRiders] = useState<any[]>([]);
+  const [ads, setAds] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  
+  const [storeStatus, setStoreStatus] = useState(true);
+  const [soundType, setSoundType] = useState("bell1"); 
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [orderFilter, setOrderFilter] = useState("Live");
+  const [searchTerm, setSearchTerm] = useState("");
+  
+  // Auto Schedule States
+  const [autoSchedule, setAutoSchedule] = useState(false);
+  const [openTime, setOpenTime] = useState("10:00");
+  const [closeTime, setCloseTime] = useState("23:00");
+  
+  const [showItemModal, setShowItemModal] = useState(false);
+  const [editingItem, setEditingItem] = useState<any>(null);
+  const [showAdModal, setShowAdModal] = useState(false);
+  const [selectedRiders, setSelectedRiders] = useState<any>({});
+  const [revealedPhones, setRevealedPhones] = useState<any>({});
+  const [processingOrders, setProcessingOrders] = useState<any>({});
+  
+  const [currentTime, setCurrentTime] = useState(Date.now());
+
+  const PLATFORM_FEE = 5;
+
+  const alertSounds: any = {
+      bell1: 'https://assets.mixkit.co/active_storage/sfx/2358/2358-preview.mp3',
+      bell2: 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3',
+      bell3: 'https://assets.mixkit.co/active_storage/sfx/1435/1435-preview.mp3',
+      bell4: 'https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3',
+      bell5: 'https://assets.mixkit.co/active_storage/sfx/2870/2870-preview.mp3',
+      trintrin: 'https://assets.mixkit.co/active_storage/sfx/2868/2868-preview.mp3',
+      loudalarm1: 'https://assets.mixkit.co/active_storage/sfx/995/995-preview.mp3',
+      loudalarm2: 'https://assets.mixkit.co/active_storage/sfx/1000/1000-preview.mp3',
+      loudalarm3: 'https://assets.mixkit.co/active_storage/sfx/1003/1003-preview.mp3',
+      loudalarm4: 'https://assets.mixkit.co/active_storage/sfx/1005/1005-preview.mp3',
+  };
+
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(Date.now()), 60000);
+
+    const q = query(collection(db, "orders"), orderBy("createdAt", "desc"));
+    const unsub = onSnapshot(q, (snap) => {
+      const fetchedOrders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (soundEnabled && fetchedOrders.length > orders.length && orders.length !== 0) {
+        const audio = new Audio(alertSounds[soundType]);
+        audio.play().catch(e => console.log("Audio play blocked"));
+      }
+      setOrders(fetchedOrders);
+      setLoading(false);
+    });
+    const unsubMenu = onSnapshot(collection(db, "menus"), (snap) => {
+      setMenuItems(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+    const unsubRiders = onSnapshot(collection(db, "riders"), (snap) => {
+      setRiders(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+    const unsubAds = onSnapshot(collection(db, "ads"), (snap) => {
+      setAds(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+    return () => { unsub(); unsubMenu(); unsubRiders(); unsubAds(); clearInterval(timer); };
+  }, [soundEnabled, soundType, orders.length]);
+
+  // Auto Schedule Logic Loop
+  useEffect(() => {
+    if (!autoSchedule) return;
+    const interval = setInterval(() => {
+        const now = new Date();
+        const currentMinutes = now.getHours() * 60 + now.getMinutes();
+        const [oH, oM] = openTime.split(':').map(Number);
+        const openMinutes = oH * 60 + oM;
+        const [cH, cM] = closeTime.split(':').map(Number);
+        const closeMinutes = cH * 60 + cM;
+        
+        let shouldBeOpen = false;
+        if (openMinutes < closeMinutes) {
+            shouldBeOpen = currentMinutes >= openMinutes && currentMinutes < closeMinutes;
+        } else { 
+            shouldBeOpen = currentMinutes >= openMinutes || currentMinutes < closeMinutes;
+        }
+        
+        if (storeStatus !== shouldBeOpen) {
+            setStoreStatus(shouldBeOpen);
+        }
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [autoSchedule, openTime, closeTime, storeStatus]);
+
+  const stats = useMemo(() => {
+    const today = new Date().toDateString();
+    
+    const validOrders = orders.filter(o => !["Cancelled", "Rejected"].includes(o.status));
+    
+    const todayOrders = validOrders.filter(o => {
+        const date = o.createdAt?.seconds ? new Date(o.createdAt.seconds * 1000) : new Date();
+        return date.toDateString() === today;
+    });
+
+    const calculateGrandTotal = (order: any) => {
+        if (Number(order.totalAmount)) return Number(order.totalAmount);
+        const itemsTotal = order.items?.reduce((acc:any, i:any) => acc + (i.price * i.qty), 0) || 0;
+        return itemsTotal + PLATFORM_FEE + (Number(order.deliveryFee) || 0);
+    };
+
+    return {
+      revenue: validOrders.reduce((sum, o) => sum + calculateGrandTotal(o), 0),
+      todayRevenue: todayOrders.reduce((sum, o) => sum + calculateGrandTotal(o), 0),
+      active: orders.filter(o => ["Pending", "Confirmed", "Preparing", "Out for Delivery"].includes(o.status)).length, // ADDED "Confirmed"
+      deliveredToday: todayOrders.filter(o => o.status === "Delivered").length,
+      chartData: orders.slice(0, 7).reverse().map(o => ({
+        time: o.createdAt?.seconds ? new Date(o.createdAt.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "Now",
+        amount: calculateGrandTotal(o)
+      }))
+    };
+  }, [orders]);
+
+  const filteredOrders = useMemo(() => {
+    return orders.filter(o => {
+      const isLive = ["Pending", "Confirmed", "Preparing", "Out for Delivery"].includes(o.status); // ADDED "Confirmed"
+      const matchesFilter = 
+        orderFilter === "All" ? true : 
+        orderFilter === "Live" ? isLive : 
+        o.status === orderFilter;
+
+      const customerStr = typeof o.customer === 'object' ? `${o.customer.name} ${o.customer.phone}` : (o.customer || "");
+      const matchesSearch = (o.id || "").toLowerCase().includes(searchTerm.toLowerCase()) || 
+                            (o.customerName || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+                            customerStr.includes(searchTerm);
+      return matchesFilter && matchesSearch;
+    });
+  }, [orders, orderFilter, searchTerm]);
+
+  const updateStatus = async (orderId: string, newStatus: string, riderId?: string) => {
+    setProcessingOrders((prev: any) => ({...prev, [orderId]: true}));
+    try {
+      const updateData: any = { status: newStatus, updatedAt: Timestamp.now() };
+      if (riderId) updateData.assignedRider = riderId;
+      await updateDoc(doc(db, "orders", orderId), updateData);
+
+      // --- NEW: DISPATCH COLLECTION LOGIC FOR RIDER PANEL ---
+      if (newStatus === "Out for Delivery" && riderId) {
+          const fullOrder = orders.find(o => o.id === orderId);
+          const fullRider = riders.find(r => r.id === riderId);
+          if (fullOrder && fullRider) {
+              await addDoc(collection(db, "dispatch"), {
+                  orderId: orderId,
+                  riderId: riderId,
+                  orderDetails: fullOrder,
+                  riderDetails: fullRider,
+                  dispatchedAt: Timestamp.now()
+              });
+          }
+      }
+      // ------------------------------------------------------
+
+    } catch (e) { 
+        alert("Update Failed!"); 
+    } finally {
+        setProcessingOrders((prev: any) => ({...prev, [orderId]: false}));
+    }
+  };
+
+  const handleRiderSelect = (orderId: string, riderId: string) => {
+      setSelectedRiders((prev: any) => ({...prev, [orderId]: riderId}));
+  };
+
+  // Bill Printing Logic
+  const printBill = (order: any) => {
+    const itemsTotal = order.items?.reduce((acc:any, i:any) => acc + (i.price * i.qty), 0) || 0;
+    const deliveryFee = Number(order.deliveryFee) || 0;
+    const grandTotal = itemsTotal + PLATFORM_FEE + deliveryFee;
+    
+    const itemsHtml = order.items?.map((i:any) => `
+        <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 5px;">
+            <span>${i.qty}x ${i.name}</span>
+            <span>Rs.${i.price * i.qty}</span>
+        </div>
+    `).join('');
+
+    const customerName = typeof order.customer === 'object' ? order.customer.name : (order.customerName || "Customer");
+    
+    const customerAddress = order.address || (typeof order.customer === 'object' ? order.customer.address : "") || "N/A";
+    
+    const orderTime = new Date(order.createdAt?.seconds ? order.createdAt.seconds * 1000 : Date.now()).toLocaleString();
+
+    const printContent = `
+        <div style="font-family: monospace; width: 300px; margin: 0 auto; padding: 10px 15px;">
+            <h2 style="text-align: center; margin: 0; font-size: 24px;">RAMKESAR</h2>
+            <p style="text-align: center; margin: 5px 0 15px 0; font-size: 12px; font-weight: bold;">Swad Jo Dil Jeet Le</p>
+            
+            <div style="border-bottom: 1px dashed #000; padding-bottom: 10px; margin-bottom: 10px; font-size: 12px;">
+                <div style="margin-bottom: 3px;"><strong>Order ID:</strong> ${order.id}</div>
+                <div style="margin-bottom: 3px;"><strong>Time:</strong> ${orderTime}</div>
+                <div style="margin-bottom: 3px;"><strong>Name:</strong> ${customerName}</div>
+                <div><strong>Address:</strong> ${customerAddress}</div>
+            </div>
+            
+            <div style="border-bottom: 1px dashed #000; padding-bottom: 10px; margin-bottom: 10px;">
+                <div style="font-weight: bold; margin-bottom: 5px; font-size: 12px;">ORDER SUMMARY</div>
+                ${itemsHtml}
+            </div>
+            
+            <div style="font-size: 12px;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
+                    <span>Items Total</span><span>Rs.${itemsTotal}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
+                    <span>Platform Fee</span><span>Rs.${PLATFORM_FEE}</span>
+                </div>
+                ${deliveryFee > 0 ? `<div style="display: flex; justify-content: space-between; margin-bottom: 3px;"><span>Delivery Fee</span><span>Rs.${deliveryFee}</span></div>` : ''}
+                <div style="display: flex; justify-content: space-between; font-weight: bold; margin-top: 10px; font-size: 16px; border-top: 1px solid #000; padding-top: 10px;">
+                    <span>GRAND TOTAL</span><span>Rs.${grandTotal}</span>
+                </div>
+            </div>
+            
+            <div style="text-align: center; margin-top: 20px; font-size: 11px; font-weight: bold;">
+                <p>Thanks for visiting!<br/>Have a great meal.</p>
+            </div>
+        </div>
+    `;
+
+    const printWindow = window.open('', '_blank', 'width=400,height=600');
+    if(printWindow) {
+        printWindow.document.write('<html><head><title>Print Bill</title></head><body>' + printContent + '</body></html>');
+        printWindow.document.close();
+        printWindow.focus();
+        setTimeout(() => { 
+            printWindow.print(); 
+            printWindow.close(); 
+        }, 500);
+    }
+  };
+
+  if (loading) return (
+    <div className="h-screen flex flex-col items-center justify-center bg-white">
+      <div className="w-12 h-12 border-4 border-red-600 border-t-transparent rounded-full animate-spin mb-4"></div>
+      <p className="font-black italic uppercase text-[10px] tracking-widest text-slate-400">Loading RamKesar Engine...</p>
+    </div>
+  );
+
+  return (
+    <div className={`flex h-screen font-sans overflow-hidden transition-colors duration-300 ${isDarkMode ? 'dark' : ''}`}>
+      <style>{`
+        .dark { background-color: #0f172a !important; color: #f8fafc !important; }
+        .dark .bg-white { background-color: #1e293b !important; border-color: #334155 !important; }
+        .dark .bg-slate-50, .dark .bg-slate-100 { background-color: #0f172a !important; border-color: #1e293b !important; color: #f8fafc !important; }
+        .dark .text-slate-900 { color: #f8fafc !important; }
+        .dark .text-slate-600, .dark .text-slate-700 { color: #cbd5e1 !important; }
+        .dark .border-slate-100, .dark .border-slate-200 { border-color: #334155 !important; }
+      `}</style>
+
+      <aside className="w-72 bg-slate-100 border-r border-slate-200 flex flex-col shrink-0 z-50 inner-content">
+        <div className="p-8">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-10 h-10 bg-red-600 rounded-xl rotate-3 flex items-center justify-center text-white shadow-lg">
+                <UtensilsCrossed size={20} />
+            </div>
+            <h1 className="text-2xl font-black italic text-slate-900 tracking-tighter uppercase">RamKesar</h1>
+          </div>
+          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.3em] ml-1">Terminal Admin</p>
+        </div>
+        
+        <nav className="flex-1 px-4 space-y-1 overflow-y-auto custom-scrollbar">
+          {[
+            { id: "dashboard", label: "Overview", icon: LayoutDashboard },
+            { id: "orders", label: "Order Desk", icon: ShoppingCart, badge: stats.active },
+            { id: "menu", label: "Menu Editor", icon: UtensilsCrossed },
+            { id: "riders", label: "Fleet Mgmt", icon: Bike },
+            { id: "ads", label: "Ads & Promo", icon: ImageIcon },
+            { id: "settings", label: "System", icon: Settings },
+          ].map((item) => (
+            <button key={item.id} onClick={() => setActiveTab(item.id)}
+              className={`w-full flex items-center justify-between px-5 py-4 rounded-[1.5rem] text-[11px] font-black transition-all group ${activeTab === item.id ? "bg-slate-900 text-white shadow-xl" : "text-slate-400 hover:bg-slate-200 hover:text-slate-600"}`}
+            >
+              <div className="flex items-center gap-4">
+                <item.icon size={18} className={activeTab === item.id ? "text-red-500" : ""} /> 
+                <span className="uppercase italic tracking-tighter">{item.label}</span>
+              </div>
+              {item.badge ? <span className="bg-red-500 text-white text-[9px] px-2 py-0.5 rounded-full">{item.badge}</span> : null}
+            </button>
+          ))}
+        </nav>
+
+        <div className="p-6">
+            <div className="bg-white rounded-3xl p-4 border border-slate-200 shadow-sm">
+                <button onClick={() => setStoreStatus(!storeStatus)} className={`w-full flex items-center justify-center gap-2 py-3 rounded-2xl font-black text-[10px] uppercase italic transition-all ${storeStatus ? 'bg-green-500 text-white' : 'bg-red-600 text-white'}`}>
+                    <Power size={14} /> Store {storeStatus ? 'Online' : 'Offline'}
+                </button>
+                {autoSchedule && <p className="text-center text-[8px] font-bold text-slate-400 mt-2 uppercase">Auto-Schedule Active</p>}
+            </div>
+        </div>
+      </aside>
+
+      <main className="flex-1 flex flex-col overflow-hidden relative inner-content">
+        
+        <header className="h-24 bg-white/80 backdrop-blur-md border-b border-slate-100 flex items-center justify-between px-10 shrink-0 sticky top-0 z-40">
+          <div>
+            <h2 className="text-xl font-black italic uppercase tracking-tighter text-slate-900">{activeTab}</h2>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{new Date().toDateString()}</p>
+          </div>
+
+          <div className="flex items-center gap-6">
+            <div className="relative">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+              <input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Search Orders..." 
+                className="w-80 pl-12 pr-6 py-3 bg-slate-50 rounded-2xl outline-none text-[11px] font-bold border focus:border-red-100 transition-all" />
+            </div>
+            <div className="flex items-center gap-4">
+                <button onClick={() => setSoundEnabled(!soundEnabled)} className="p-3 bg-slate-50 border border-slate-100 rounded-full text-slate-600 hover:text-red-500 transition-colors">
+                    {soundEnabled ? <Volume2 size={16} /> : <VolumeX size={16} className="text-red-500" />}
+                </button>
+                <div className="text-right ml-2">
+                   <p className="text-[9px] font-black text-slate-400 uppercase italic">Today Revenue</p>
+                   <p className="text-lg font-black text-red-600 italic">₹{stats.todayRevenue}</p>
+                </div>
+                <div className="h-10 w-px bg-slate-100"></div>
+                <div className="flex items-center gap-3 bg-slate-900 text-white p-1.5 pr-5 rounded-full">
+                    <div className="w-9 h-9 bg-red-600 rounded-full flex items-center justify-center font-black italic uppercase">RK</div>
+                    <span className="text-[10px] font-black uppercase italic">Owner</span>
+                </div>
+            </div>
+          </div>
+        </header>
+
+        <div className="flex-1 overflow-y-auto p-10 space-y-10 custom-scrollbar">
+          <AnimatePresence mode="wait">
+            
+            {activeTab === "dashboard" && (
+              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} key="dash" className="space-y-10">
+                <div className="grid grid-cols-4 gap-6">
+                  {[
+                    { label: "Today Revenue", val: `₹${stats.todayRevenue}`, icon: TrendingUp, color: "text-blue-600", bg: "bg-blue-50" },
+                    { label: "Active Orders", val: stats.active, icon: ShoppingCart, color: "text-red-600", bg: "bg-red-50" },
+                    { label: "Delivered", val: stats.deliveredToday, icon: CheckCircle2, color: "text-green-600", bg: "bg-green-50" },
+                    { label: "Riders", val: riders.length, icon: Bike, color: "text-purple-600", bg: "bg-purple-50" },
+                  ].map((s, i) => (
+                    <div key={i} className="bg-white p-7 rounded-[2.5rem] border border-slate-100 shadow-sm flex items-center justify-between">
+                      <div><p className="text-[9px] font-black text-slate-400 uppercase mb-1">{s.label}</p><p className="text-2xl font-black italic text-slate-900">{s.val}</p></div>
+                      <div className={`w-14 h-14 rounded-3xl ${s.bg} ${s.color} flex items-center justify-center`}><s.icon size={26} /></div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-3 gap-8">
+                    <div className="col-span-2 bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm h-[400px]">
+                        <h3 className="text-sm font-black italic text-slate-900 uppercase mb-8">Live Sales Tracker</h3>
+                        <ResponsiveContainer width="100%" height="85%">
+                            <LineChart data={stats.chartData}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
+                                <XAxis dataKey="time" stroke="#94A3B8" fontSize={10} fontWeight="bold" axisLine={false} tickLine={false} />
+                                <YAxis stroke="#94A3B8" fontSize={10} fontWeight="bold" axisLine={false} tickLine={false} />
+                                <Tooltip contentStyle={{ borderRadius: '20px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
+                                <Line type="monotone" dataKey="amount" stroke="#EF4444" strokeWidth={4} dot={{ r: 4, fill: "#EF4444" }} />
+                            </LineChart>
+                        </ResponsiveContainer>
+                    </div>
+                    <div className="bg-slate-900 rounded-[3rem] p-8">
+                         <h3 className="text-white text-sm font-black italic uppercase mb-6 flex items-center gap-2"><Activity size={18} className="text-red-500"/> Recent Logs</h3>
+                         <div className="space-y-4">
+                            {orders.slice(0, 5).map((order, i) => (
+                                <div key={i} className="flex items-center gap-4 p-4 bg-white/5 rounded-3xl border border-white/5">
+                                    <div className="flex-1">
+                                        <p className="text-[10px] font-black text-white italic uppercase">Order #{order.id.slice(-5)}</p>
+                                        <p className="text-[8px] font-bold text-slate-500 uppercase mt-0.5">{order.status}</p>
+                                    </div>
+                                    <ChevronRight size={14} className="text-slate-700" />
+                                </div>
+                            ))}
+                         </div>
+                    </div>
+                </div>
+              </motion.div>
+            )}
+
+            {activeTab === "orders" && (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} key="orders" className="space-y-8">
+                <div className="flex gap-2 overflow-x-auto no-scrollbar">
+                  {["All", "Live", "Pending", "Preparing", "Out for Delivery", "Delivered"].map(f => (
+                    <button key={f} onClick={() => setOrderFilter(f)} className={`px-6 py-3 rounded-2xl text-[10px] font-black uppercase italic border ${orderFilter === f ? "bg-red-600 text-white border-red-600 shadow-lg shadow-red-100" : "bg-white text-slate-400 border-slate-100"}`}>{f}</button>
+                  ))}
+                </div>
+                <div className="grid grid-cols-3 gap-8">
+                  {filteredOrders.map(order => {
+                    const itemsTotal = order.items?.reduce((acc:any, i:any) => acc + (i.price * i.qty), 0) || 0;
+                    const deliveryFee = Number(order.deliveryFee) || 0;
+                    const calculatedGrandTotal = itemsTotal + PLATFORM_FEE + deliveryFee;
+                    const phoneNo = typeof order.customer === 'object' ? order.customer.phone : (order.customer || order.phone || "No Number");
+                    
+                    const orderTimestampMs = order.createdAt?.seconds ? order.createdAt.seconds * 1000 : Date.now();
+                    const isDelayed = ["Pending", "Confirmed"].includes(order.status) && (currentTime - orderTimestampMs > 600000); // ADDED "Confirmed"
+
+                    return (
+                    <div key={order.id} className={`bg-white rounded-[2.5rem] border ${isDelayed ? 'border-red-400 shadow-red-100' : 'border-slate-100 shadow-sm'} p-7 flex flex-col group relative overflow-hidden transition-all`}>
+                      
+                      {isDelayed && (
+                        <div className="absolute top-0 left-0 right-0 bg-red-600 text-white text-[8px] font-black uppercase italic text-center py-1 flex items-center justify-center gap-1">
+                          <AlertTriangle size={10} /> Action Required: Delayed {'>'} 10m
+                        </div>
+                      )}
+
+                      <div className={`flex justify-between items-start mb-6 ${isDelayed ? 'mt-3' : ''}`}>
+                        <div className="flex flex-col gap-1 w-2/3">
+                            <span className="text-[10px] font-black text-slate-900 uppercase italic tracking-widest break-words leading-tight">ID: {order.id}</span>
+                            <span className="text-[8px] font-bold text-slate-400">{new Date(orderTimestampMs).toLocaleString('en-IN', {dateStyle:'medium', timeStyle:'short'})}</span>
+                        </div>
+                        <div className="flex flex-col gap-2 items-end">
+                            <span className="text-[9px] font-black text-red-600 bg-red-50 px-3 py-1 rounded-full uppercase italic shrink-0">{order.paymentMethod || 'COD'}</span>
+                            <button onClick={() => printBill(order)} className="text-[9px] font-black bg-slate-900 text-white px-3 py-1 rounded-full uppercase flex items-center gap-1 hover:bg-slate-700 transition-all"><Printer size={10}/> Print</button>
+                        </div>
+                      </div>
+                      
+                      <h3 className="font-black italic uppercase text-xs text-slate-900 mb-1">
+                          {typeof order.customer === 'object' ? order.customer.name : (order.customerName || "Customer")}
+                      </h3>
+                      
+                      <button 
+                        onClick={() => setRevealedPhones({...revealedPhones, [order.id]: true})}
+                        className="text-[9px] font-bold text-slate-500 mb-6 flex items-center gap-1.5 uppercase bg-slate-50 hover:bg-slate-100 px-3 py-1.5 rounded-lg transition-all w-fit border border-slate-100"
+                      >
+                          <Phone size={12} className="text-red-500"/> 
+                          {revealedPhones[order.id] ? phoneNo : "Click to View Number"}
+                      </button>
+                      
+                      <div className="bg-slate-50 p-5 rounded-3xl mb-6">
+                         <div className="space-y-3 mb-3">
+                            {order.items?.map((item:any, i:number) => (
+                            <div key={i} className="flex justify-between text-[11px] font-black italic text-slate-700 uppercase">
+                                <span className="w-2/3 truncate pr-2">{item.qty}x {item.name}</span>
+                                <span>₹{item.price * item.qty}</span>
+                            </div>
+                            ))}
+                         </div>
+                         <div className="pt-3 border-t border-dashed border-slate-200 text-[10px] font-black space-y-1.5">
+                            <div className="flex justify-between text-slate-400"><span>Items Total</span><span>₹{itemsTotal}</span></div>
+                            <div className="flex justify-between text-slate-400"><span>Platform Fee</span><span>₹{PLATFORM_FEE}</span></div>
+                            <div className="flex justify-between text-slate-400"><span>Delivery Fee</span><span>₹{deliveryFee}</span></div>
+                            <div className="flex justify-between text-red-600 text-[13px] uppercase italic mt-2 border-t border-slate-200 pt-2">
+                                <span>Grand Total</span>
+                                <span>₹{calculatedGrandTotal}</span>
+                            </div>
+                         </div>
+                      </div>
+
+                      <div className="mt-auto space-y-2">
+                        {/* ADDED "Confirmed" HERE SO BUTTONS SHOW UP */}
+                        {["Pending", "Confirmed"].includes(order.status) && (
+                            <div className="flex gap-2 items-center">
+                                <button onClick={() => updateStatus(order.id, "Cancelled")} className="px-3 bg-red-50 text-red-500 py-3 rounded-2xl text-[9px] font-black uppercase italic border border-red-100 hover:bg-red-100 transition-all">Reject</button>
+                                <button 
+                                    disabled={processingOrders[order.id]}
+                                    onClick={() => updateStatus(order.id, "Preparing")} 
+                                    className="flex-1 bg-slate-900 text-white py-3 rounded-2xl text-[10px] font-black uppercase italic shadow-lg active:scale-95 transition-all disabled:opacity-50"
+                                >
+                                    {processingOrders[order.id] ? "Processing..." : "Accept & Prepare"}
+                                </button>
+                            </div>
+                        )}
+                        
+                        {order.status === "Preparing" && (
+                            <div className="space-y-2 bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                                <select onChange={(e) => handleRiderSelect(order.id, e.target.value)} className="w-full bg-white p-3 rounded-xl text-[10px] font-black uppercase italic outline-none border focus:border-red-100 text-slate-600 cursor-pointer">
+                                   <option value="">+ Assign Rider</option>
+                                   {riders.map(r => <option key={r.id} value={r.id}>{r.name} ({r.vehicleNumber || 'No Vehicle'})</option>)}
+                                </select>
+                                <button 
+                                    disabled={!selectedRiders[order.id] || processingOrders[order.id]}
+                                    onClick={() => updateStatus(order.id, "Out for Delivery", selectedRiders[order.id])} 
+                                    className="w-full bg-orange-500 text-white py-3 rounded-xl text-[10px] font-black uppercase italic shadow-md disabled:opacity-50"
+                                >
+                                    {processingOrders[order.id] ? "Dispatching..." : "Handover & Dispatch"}
+                                </button>
+                            </div>
+                        )}
+                        
+                        {order.status === "Out for Delivery" && (
+                            <div className="w-full bg-slate-100 text-slate-500 py-3.5 rounded-2xl text-[10px] font-black uppercase italic text-center border border-slate-200 flex items-center justify-center gap-2">
+                                <Bike size={14} /> Rider Control (Awaiting Delivery)
+                            </div>
+                        )}
+                      </div>
+                    </div>
+                  )})}
+                </div>
+              </motion.div>
+            )}
+
+            {activeTab === "menu" && (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
+                <div className="flex justify-between items-center">
+                    <h2 className="text-3xl font-black italic uppercase tracking-tighter text-slate-900">Kitchen Menu</h2>
+                    <button onClick={() => {setEditingItem(null); setShowItemModal(true);}} className="bg-red-600 text-white px-8 py-4 rounded-3xl font-black text-[11px] uppercase italic flex items-center gap-3 shadow-xl shadow-red-100"><Plus size={18}/> Add Dish</button>
+                </div>
+                <div className="grid grid-cols-4 gap-8">
+                   {menuItems.map(item => {
+                     const discountVal = Number(item.discount) || 0;
+                     const actualPrice = item.price - (item.price * discountVal / 100);
+                     return(
+                     <div key={item.id} className="bg-white rounded-[2.5rem] border border-slate-100 p-5 shadow-sm group">
+                        <div className="h-44 bg-slate-100 rounded-3xl mb-5 overflow-hidden relative">
+                           <img src={item.image} className="w-full h-full object-cover group-hover:scale-110 transition-all duration-700" />
+                           <div className={`absolute top-4 right-4 w-3 h-3 rounded-full ${item.inStock ? 'bg-green-500' : 'bg-slate-300'}`} />
+                           <div className="absolute top-4 left-4 bg-white/90 backdrop-blur px-2 py-1 rounded-lg text-[8px] font-black uppercase italic text-slate-900 shadow-sm">⭐ {item.rating || '4.5'}</div>
+                        </div>
+                        <h3 className="font-black italic text-sm uppercase truncate text-slate-900">{item.name}</h3>
+                        <p className="text-[9px] text-slate-400 mt-1 truncate">{item.description || 'No description'}</p>
+                        <div className="flex justify-between items-end mt-4 pt-4 border-t border-slate-50">
+                           <div>
+                             <p className="text-xl font-black text-red-600 italic leading-none">₹{actualPrice.toFixed(0)}</p>
+                             {discountVal > 0 && <p className="text-[9px] font-bold text-slate-400 line-through mt-1">₹{item.price}</p>}
+                           </div>
+                           <div className="flex gap-2">
+                             <button onClick={() => {setEditingItem(item); setShowItemModal(true);}} className="p-2.5 bg-slate-50 rounded-xl text-slate-400 hover:text-blue-500"><Edit3 size={16}/></button>
+                             <button onClick={() => updateDoc(doc(db, "menus", item.id), { inStock: !item.inStock })} className={`p-2.5 rounded-xl ${item.inStock ? 'bg-green-50 text-green-500' : 'bg-red-50 text-red-500'}`}><Power size={16}/></button>
+                           </div>
+                        </div>
+                     </div>
+                   )})}
+                </div>
+              </motion.div>
+            )}
+
+            {activeTab === "riders" && (
+                <div className="grid grid-cols-3 gap-10">
+                    <div className="col-span-2 space-y-6">
+                        <h2 className="text-2xl font-black italic text-slate-900 uppercase tracking-tighter">Delivery Fleet</h2>
+                        <div className="grid grid-cols-2 gap-6">
+                            {riders.map(r => (
+                                <div key={r.id} className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex items-center gap-5">
+                                    <div className="w-14 h-14 bg-slate-900 text-white rounded-3xl flex items-center justify-center shadow-lg shadow-slate-200"><Bike size={24}/></div>
+                                    <div className="flex-1 overflow-hidden">
+                                        <p className="font-black italic uppercase text-sm text-slate-900 truncate">{r.name}</p>
+                                        <p className="text-[9px] font-bold text-slate-400 uppercase mt-1">ID: {r.id}</p>
+                                        <p className="text-[9px] font-black text-slate-500 uppercase mt-0.5 bg-slate-50 inline-block px-2 py-0.5 rounded-md border">{r.vehicleNumber}</p>
+                                    </div>
+                                    <button onClick={() => deleteDoc(doc(db, "riders", r.id))} className="p-3 bg-red-50 text-red-500 rounded-2xl hover:bg-red-500 hover:text-white transition-all"><Trash2 size={16}/></button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="bg-white p-10 rounded-[3.5rem] border border-slate-100 shadow-xl h-fit">
+                        <h3 className="font-black italic uppercase text-xs text-slate-400 mb-8 text-center tracking-widest underline underline-offset-8">Rider Onboarding</h3>
+                        <form onSubmit={async (e:any) => {
+                            e.preventDefault();
+                            const fd = new FormData(e.target);
+                            const newRider = Object.fromEntries(fd.entries());
+                            newRider.createdAt = Timestamp.now();
+                            newRider.status = "Active"; 
+                            await addDoc(collection(db, "riders"), newRider);
+                            e.target.reset();
+                        }} className="space-y-4">
+                            <input name="name" placeholder="Full Name" className="w-full bg-slate-50 p-4 rounded-2xl text-[11px] font-bold outline-none border focus:border-red-100 text-slate-900" required />
+                            <input name="aadhar" placeholder="Aadhar Number" className="w-full bg-slate-50 p-4 rounded-2xl text-[11px] font-bold outline-none border focus:border-red-100 text-slate-900" required />
+                            <input name="number" placeholder="Mobile Number" className="w-full bg-slate-50 p-4 rounded-2xl text-[11px] font-bold outline-none border focus:border-red-100 text-slate-900" required />
+                            <input name="vehicleNumber" placeholder="Vehicle Reg No. (UP16-XX-XXXX)" className="w-full bg-slate-50 p-4 rounded-2xl text-[11px] font-bold outline-none border focus:border-red-100 text-slate-900" required />
+                            <button className="w-full bg-red-600 text-white py-5 rounded-2xl font-black text-[11px] uppercase italic shadow-2xl active:scale-95 transition-all">Verify & Approve</button>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {activeTab === "ads" && (
+                <div className="space-y-10">
+                    <div className="flex justify-between items-center">
+                        <h2 className="text-2xl font-black italic uppercase text-slate-900">Banners & Promotions</h2>
+                        <button onClick={() => setShowAdModal(true)} className="bg-slate-900 text-white px-8 py-4 rounded-3xl font-black text-[10px] uppercase italic flex items-center gap-3"><Plus size={18}/> Push Banner</button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-10">
+                        {ads.map(ad => (
+                            <div key={ad.id} className="bg-white rounded-[3rem] border-4 border-white shadow-xl overflow-hidden group">
+                                <div className="aspect-[16/7] bg-slate-100">
+                                    <img src={ad.image} alt={ad.name} className="w-full h-full object-cover" />
+                                </div>
+                                <div className="p-6 flex justify-between items-center">
+                                    <span className="text-[10px] font-black uppercase text-slate-600 italic tracking-[0.1em]">{ad.name || 'Ad Campaign'}</span>
+                                    <button onClick={() => deleteDoc(doc(db, "ads", ad.id))} className="text-red-500 font-black text-[10px] uppercase italic flex items-center gap-1 hover:underline"><Trash2 size={14}/> Remove</button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {activeTab === "settings" && (
+                <div className="max-w-2xl bg-white p-12 rounded-[4rem] border border-slate-100 shadow-sm mx-auto">
+                    <h2 className="text-2xl font-black italic uppercase mb-10 text-center tracking-tighter text-slate-900">System Terminal Settings</h2>
+                    <div className="space-y-6">
+                        
+                        <div className="flex items-center justify-between p-7 bg-slate-50 rounded-[2.5rem]">
+                            <div><p className="font-black italic uppercase text-sm text-slate-900">Store Visibility</p><p className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Manual Override Status</p></div>
+                            <button onClick={() => setStoreStatus(!storeStatus)} className={`w-14 h-7 rounded-full relative transition-all ${storeStatus ? 'bg-green-500' : 'bg-red-500'}`}>
+                                <div className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-all ${storeStatus ? 'right-1' : 'left-1'}`} />
+                            </button>
+                        </div>
+
+                        <div className="p-7 bg-slate-50 rounded-[2.5rem] space-y-4">
+                            <div className="flex items-center justify-between">
+                                <div><p className="font-black italic uppercase text-sm text-slate-900">Auto Scheduling</p><p className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Automate store open/close</p></div>
+                                <button onClick={() => setAutoSchedule(!autoSchedule)} className={`w-14 h-7 rounded-full relative transition-all ${autoSchedule ? 'bg-slate-900' : 'bg-slate-300'}`}>
+                                    <div className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-all ${autoSchedule ? 'right-1' : 'left-1'}`} />
+                                </button>
+                            </div>
+                            {autoSchedule && (
+                                <div className="flex gap-4 pt-4 border-t border-slate-200">
+                                    <div className="flex-1">
+                                        <label className="text-[9px] font-bold text-slate-400 uppercase">Opening Time</label>
+                                        <input type="time" value={openTime} onChange={(e) => setOpenTime(e.target.value)} className="w-full mt-1 bg-white p-3 rounded-xl text-[10px] font-black border border-slate-200 outline-none text-slate-900"/>
+                                    </div>
+                                    <div className="flex-1">
+                                        <label className="text-[9px] font-bold text-slate-400 uppercase">Closing Time</label>
+                                        <input type="time" value={closeTime} onChange={(e) => setCloseTime(e.target.value)} className="w-full mt-1 bg-white p-3 rounded-xl text-[10px] font-black border border-slate-200 outline-none text-slate-900"/>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="flex items-center justify-between p-7 bg-slate-50 rounded-[2.5rem]">
+                            <div><p className="font-black italic uppercase text-sm text-slate-900">Alert Bell Logic</p><p className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Choose notification sound</p></div>
+                            <select 
+                              value={soundType} 
+                              onChange={(e)=>setSoundType(e.target.value)} 
+                              className="bg-white p-3 rounded-xl text-[10px] font-black uppercase italic outline-none border border-slate-200 text-slate-900 cursor-pointer"
+                            >
+                                <option value="bell1">Standard Chime</option>
+                                <option value="bell2">Digital Ping</option>
+                                <option value="bell3">Classic Bell</option>
+                                <option value="bell4">Soft Notification</option>
+                                <option value="bell5">Alert Tone</option>
+                                <option value="trintrin">Trin Trin</option>
+                                <option value="loudalarm1">Zomato Loud 1</option>
+                                <option value="loudalarm2">Zomato Loud 2</option>
+                                <option value="loudalarm3">Zomato Loud 3</option>
+                                <option value="loudalarm4">Zomato Loud 4</option>
+                            </select>
+                        </div>
+                        
+                        <div className="flex items-center justify-between p-7 bg-slate-50 rounded-[2.5rem]">
+                            <div>
+                              <p className="font-black italic uppercase text-sm text-slate-900">Dashboard Theme</p>
+                              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Toggle dark mode environment</p>
+                            </div>
+                            <button onClick={() => setIsDarkMode(!isDarkMode)} className={`w-14 h-7 rounded-full relative transition-all ${isDarkMode ? 'bg-slate-800' : 'bg-slate-300'}`}>
+                                <div className={`absolute top-1 w-5 h-5 flex items-center justify-center rounded-full transition-all ${isDarkMode ? 'right-1 bg-slate-900 text-white' : 'left-1 bg-white text-yellow-500'}`}>
+                                    {isDarkMode ? <Moon size={12} /> : <Sun size={12} />}
+                                </div>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+          </AnimatePresence>
+        </div>
+      </main>
+
+      {/* DISH EDITOR MODAL */}
+      <AnimatePresence>
+        {showItemModal && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
+                <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0, y: 20 }} className="bg-white p-10 rounded-[3rem] w-[500px] shadow-2xl relative border border-slate-100">
+                    <button onClick={() => setShowItemModal(false)} className="absolute top-8 right-8 p-2 bg-slate-50 rounded-full text-slate-400 hover:text-red-500 transition-all"><XCircle size={24} /></button>
+                    <h2 className="text-2xl font-black italic uppercase tracking-tighter text-slate-900 mb-8">{editingItem ? "Update Recipe" : "Add New Dish"}</h2>
+                    
+                    <form onSubmit={async (e: any) => {
+                        e.preventDefault();
+                        const fd = new FormData(e.target);
+                        const data = Object.fromEntries(fd.entries());
+                        data.price = Number(data.price);
+                        data.discount = Number(data.discount);
+                        data.inStock = editingItem ? editingItem.inStock : true;
+                        
+                        try {
+                          if (editingItem) {
+                              await updateDoc(doc(db, "menus", editingItem.id), data);
+                          } else {
+                              await addDoc(collection(db, "menus"), data);
+                          }
+                          setShowItemModal(false);
+                        } catch (error) {
+                          alert("Failed to sync menu item.");
+                        }
+                    }} className="space-y-4">
+                        <input name="name" defaultValue={editingItem?.name} placeholder="Dish Name" className="w-full bg-slate-50 p-4 rounded-2xl text-[11px] font-bold outline-none border focus:border-red-100 text-slate-900" required />
+                        <input name="description" defaultValue={editingItem?.description} placeholder="Short Description" className="w-full bg-slate-50 p-4 rounded-2xl text-[11px] font-bold outline-none border focus:border-red-100 text-slate-900" required />
+                        
+                        <div className="grid grid-cols-2 gap-4">
+                            <input name="prepTime" defaultValue={editingItem?.prepTime} placeholder="Prep Time (mins)" className="w-full bg-slate-50 p-4 rounded-2xl text-[11px] font-bold outline-none border focus:border-red-100 text-slate-900" required />
+                            <input name="image" defaultValue={editingItem?.image} placeholder="Image URL" className="w-full bg-slate-50 p-4 rounded-2xl text-[11px] font-bold outline-none border focus:border-red-100 text-slate-900" required />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                            <input name="price" type="number" defaultValue={editingItem?.price} placeholder="Base Price (₹)" className="w-full bg-slate-50 p-4 rounded-2xl text-[11px] font-bold outline-none border focus:border-red-100 text-slate-900" required />
+                            <input name="discount" type="number" defaultValue={editingItem?.discount || 0} placeholder="Discount (%)" className="w-full bg-slate-50 p-4 rounded-2xl text-[11px] font-bold outline-none border focus:border-red-100 text-slate-900" />
+                        </div>
+                        
+                        <input name="rating" defaultValue={editingItem?.rating || "4.5"} placeholder="Initial Rating Display" className="w-full bg-slate-50 p-4 rounded-2xl text-[11px] font-bold outline-none border focus:border-red-100 text-slate-900" />
+                        <button className="w-full bg-red-600 text-white py-5 rounded-2xl font-black text-[11px] uppercase italic shadow-xl shadow-red-100 active:scale-95 transition-all mt-4">{editingItem ? "Push Update" : "Deploy to Menu"}</button>
+                    </form>
+                </motion.div>
+            </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* AD CAMPAIGN MODAL */}
+      <AnimatePresence>
+        {showAdModal && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
+                <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0, y: 20 }} className="bg-white p-10 rounded-[3rem] w-[500px] shadow-2xl relative border border-slate-100">
+                    <button onClick={() => setShowAdModal(false)} className="absolute top-8 right-8 p-2 bg-slate-50 rounded-full text-slate-400 hover:text-slate-900 transition-all"><XCircle size={24} /></button>
+                    <h2 className="text-2xl font-black italic uppercase tracking-tighter text-slate-900 mb-8">Deploy Banner</h2>
+                    
+                    <form onSubmit={async (e: any) => {
+                        e.preventDefault();
+                        const fd = new FormData(e.target);
+                        try {
+                          await addDoc(collection(db, "ads"), { image: fd.get("image"), name: fd.get("name") });
+                          setShowAdModal(false);
+                        } catch (error) {
+                          alert("Failed to push campaign.");
+                        }
+                    }} className="space-y-4">
+                        <input name="name" placeholder="Campaign Name" className="w-full bg-slate-50 p-4 rounded-2xl text-[11px] font-bold outline-none border focus:border-red-100 text-slate-900" required />
+                        <input name="image" placeholder="Marketing Asset URL (Image)" className="w-full bg-slate-50 p-4 rounded-2xl text-[11px] font-bold outline-none border focus:border-red-100 text-slate-900" required />
+                        <p className="text-[9px] font-bold text-slate-400 italic px-2">Optimal delivery resolution: 16:7 aspect ratio.</p>
+                        <button className="w-full bg-slate-900 text-white py-5 rounded-2xl font-black text-[11px] uppercase italic shadow-xl active:scale-95 transition-all mt-4">Push Campaign Live</button>
+                    </form>
+                </motion.div>
+            </motion.div>
+        )}
+      </AnimatePresence>
+
+    </div>
+  );
+}

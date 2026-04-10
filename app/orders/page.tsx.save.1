@@ -1,0 +1,77 @@
+kk const [isSaved, setIsSaved] = useState(false);
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (u) => {
+      if (u) {
+        setUser(u);
+        const userRef = doc(db, "users", u.uid);
+        onSnapshot(userRef, (snap) => {
+          if (snap.exists()) {
+            const data = snap.data();
+            setProfile({ name: data.name, mobile: data.mobile, address: data.address });
+            setIsSaved(true); // Data hai toh form mat dikhao
+          } else {
+            setProfile(p => ({ ...p, name: u.displayName || "" }));
+            setIsSaved(false); // Data nahi hai toh form dikhao
+          }
+          setLoading(false);
+        });
+      } else {
+        setUser(null);
+        setLoading(false);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  const handleSave = async () => {
+    if (!profile.mobile || profile.mobile.length < 10) return alert("Enter 10 digit number");
+    await setDoc(doc(db, "users", user.uid), { ...profile, uid: user.uid }, { merge: true });
+    alert("Profile Connected! 🚀");
+    router.push('/'); // Save karne ke baad wapas home par bhej do jahan ab name dikhega
+  };
+
+  if (loading) return <div className="h-screen flex items-center justify-center font-black italic text-red-500">SYNCING...</div>;
+
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <header className="p-5 bg-white border-b flex items-center gap-4">
+        <button onClick={() => router.push('/')}><ArrowLeft size={20}/></button>
+        <h1 className="font-black italic uppercase">Account Setup</h1>
+      </header>
+
+      <div className="max-w-md mx-auto p-4 mt-10">
+        {!user ? (
+          <button onClick={() => signInWithPopup(auth, provider)} className="w-full bg-red-500 text-white font-black py-4 rounded-2xl shadow-xl">
+            LOGIN WITH GOOGLE
+          </button>
+        ) : (
+          <div className="bg-white p-8 rounded-[2.5rem] shadow-sm space-y-5 border">
+            <h2 className="font-black italic text-red-500 text-sm tracking-widest uppercase">
+              {isSaved ? "Account Verified ✅" : "Complete Your Profile"}
+            </h2>
+            
+            <div className="space-y-4">
+              <div className="bg-gray-50 p-4 rounded-2xl flex items-center gap-4">
+                <User size={18} className="text-gray-400" />
+                <input className="bg-transparent w-full outline-none font-bold text-sm" value={profile.name} onChange={(e)=>setProfile({...profile, name: e.target.value})} placeholder="Name" />
+              </div>
+              <div className="bg-gray-50 p-4 rounded-2xl flex items-center gap-4">
+                <Phone size={18} className="text-gray-400" />
+                <input className="bg-transparent w-full outline-none font-bold text-sm" value={profile.mobile} onChange={(e)=>setProfile({...profile, mobile: e.target.value})} placeholder="Mobile Number" />
+              </div>
+              <div className="bg-gray-50 p-4 rounded-2xl flex items-start gap-4">
+                <MapPin size={18} className="text-gray-400 mt-1" />
+                <textarea className="bg-transparent w-full outline-none font-bold text-sm h-20 resize-none" value={profile.address} onChange={(e)=>setProfile({...profile, address: e.target.value})} placeholder="Delivery Address" />
+              </div>
+            </div>
+
+            <button onClick={handleSave} className="w-full bg-black text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2 mt-4 active:scale-95 transition-all">
+              <CheckCircle size={18}/> {isSaved ? "UPDATE DATA" : "CONNECT & CONTINUE"}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

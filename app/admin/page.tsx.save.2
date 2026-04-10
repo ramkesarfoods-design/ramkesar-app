@@ -1,0 +1,184 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import {
+  collection,
+  onSnapshot,
+  updateDoc,
+  doc,
+} from "firebase/firestore";
+
+import { db } from "@/firebase/config";
+
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+} from "chart.js";
+
+import { Bar } from "react-chartjs-2";
+
+ChartJS.register(CategoryScale, LinearScale, BarElement);
+
+export default function AdminPanel() {
+
+  const [orders, setOrders] = useState<any[]>([]);
+  const [view, setView] = useState("dashboard");
+
+  // 🔥 REALTIME SYNC (CUSTOMER APP CONNECT)
+  useEffect(() => {
+
+    const unsub = onSnapshot(collection(db, "orders"), (snap) => {
+      setOrders(
+        snap.docs.map((d) => ({
+          id: d.id,
+          ...d.data(),
+        }))
+      );
+    });
+
+    return () => unsub();
+
+  }, []);
+
+  // 📊 ANALYTICS
+  const dailySales = orders.map((o) => o.total || 0);
+
+  // 🧾 INVOICE
+  const downloadInvoice = (order: any) => {
+    const html = `
+      <h1>RamKesar Invoice</h1>
+      <p>Order: ${order.orderNumber}</p>
+      <p>Total: ₹${order.total}</p>
+    `;
+    const win = window.open("", "_blank");
+    win?.document.write(html);
+    win?.print();
+  };
+
+  return (
+    <div className="flex h-screen bg-gray-100">
+
+      {/* SIDEBAR */}
+      <div className="w-64 bg-black text-white p-4">
+
+        <h2 className="text-2xl font-bold mb-6">
+          RamKesar 🚀
+        </h2>
+
+        {[
+          "dashboard",
+          "orders",
+          "analytics",
+          "tracking",
+        ].map((v) => (
+          <div
+            key={v}
+            onClick={() => setView(v)}
+            className="mb-3 cursor-pointer"
+          >
+            {v.toUpperCase()}
+          </div>
+        ))}
+
+      </div>
+
+      {/* MAIN */}
+      <div className="flex-1 p-6">
+
+        <h1 className="text-2xl font-bold mb-4">
+          Admin Panel 💎
+        </h1>
+
+        {/* DASHBOARD */}
+        {view === "dashboard" && (
+          <div>
+
+            <p>Total Orders: {orders.length}</p>
+            <p>
+              Total Revenue: ₹
+              {orders.reduce((s, o) => s + (o.total || 0), 0)}
+            </p>
+
+          </div>
+        )}
+
+        {/* ORDERS */}
+        {view === "orders" && (
+          <div>
+
+            {orders.map((o) => (
+              <div key={o.id} className="bg-white p-3 mb-3 shadow">
+
+                <p>#{o.orderNumber}</p>
+                <p>₹{o.total}</p>
+
+                <button
+                  onClick={() =>
+                    updateDoc(doc(db, "orders", o.id), {
+                      status: "delivered",
+                    })
+                  }
+                >
+                  Mark Delivered
+                </button>
+
+                <button
+                  onClick={() => downloadInvoice(o)}
+                  className="ml-2"
+                >
+                  Invoice
+                </button>
+
+              </div>
+            ))}
+
+          </div>
+        )}
+
+        {/* ANALYTICS */}
+        {view === "analytics" && (
+          <div>
+
+            <Bar
+              data={{
+                labels: orders.map((_, i) => "Day " + (i + 1)),
+                datasets: [
+                  {
+                    label: "Sales",
+                    data: dailySales,
+                  },
+                ],
+              }}
+            />
+
+          </div>
+        )}
+
+        {/* TRACKING */}
+        {view === "tracking" && (
+          <div>
+
+            <h2>Live Rider Tracking 🚴</h2>
+
+            {orders.map((o) => (
+              <div key={o.id}>
+
+                Order {o.orderNumber} →
+                {o.riderName || "Not Assigned"}
+
+              </div>
+            ))}
+
+          </div>
+        )}
+
+      </div>
+
+    </div>
+  );
+}
+
+
+^^^

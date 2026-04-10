@@ -1,0 +1,262 @@
+"use client";
+import { useEffect, useState } from "react";
+import {
+  collection,
+  getDocs,
+  addDoc
+} from "firebase/firestore";
+import { db } from "../firebase/config";
+
+export default function HomePage() {
+  const [items, setItems] = useState<any[]>([]);
+  const [ads, setAds] = useState<any[]>([]);
+  const [filter, setFilter] = useState("All");
+  const [search, setSearch] = useState("");
+  const [currentAd, setCurrentAd] = useState(0);
+  const [cart, setCart] = useState<any[]>([]);
+
+  const normalize = (str: string) =>
+    str?.toLowerCase().replace(/\s/g, "");
+
+  useEffect(() => {
+    const fetchData = async () => {
+      const menuSnap = await getDocs(collection(db, "menus"));
+      const adsSnap = await getDocs(collection(db, "ads"));
+
+      setItems(
+        menuSnap.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }))
+      );
+
+      setAds(
+        adsSnap.docs.map((doc) => doc.data())
+      );
+    };
+
+    fetchData();
+  }, []);
+
+  useEffect(() => {
+    if (ads.length === 0) return;
+    const interval = setInterval(() => {
+      setCurrentAd((prev) => (prev + 1) % ads.length);
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [ads]);
+
+  const filteredItems = items.filter((item) => {
+    const matchFilter =
+      filter === "All"
+        ? true
+        : ["snacks", "sweets", "drinks"].includes(normalize(filter))
+        ? normalize(item.category) === normalize(filter)
+        : normalize(item.tag) === normalize(filter);
+
+    const matchSearch = normalize(item.name).includes(
+      normalize(search)
+    );
+
+    return matchFilter && matchSearch;
+  });
+
+  const addToCart = (item: any) => {
+    setCart((prev) => {
+      const exist = prev.find((i) => i.id === item.id);
+      if (exist) {
+        return prev.map((i) =>
+          i.id === item.id
+            ? { ...i, qty: i.qty + 1 }
+            : i
+        );
+      }
+      return [...prev, { ...item, qty: 1 }];
+    });
+  };
+
+  const updateQty = (id: string, type: string) => {
+    setCart((prev) =>
+      prev
+        .map((i) => {
+          if (i.id === id) {
+            if (type === "inc") return { ...i, qty: i.qty + 1 };
+            if (type === "dec") return { ...i, qty: i.qty - 1 };
+          }
+          return i;
+        })
+        .filter((i) => i.qty > 0)
+    );
+  };
+
+  const total = cart.reduce((sum, item) => {
+    const price = Number(item.price) || 0;
+    const discount = Number(item.discount) || 0;
+    const final = price - (price * discount) / 100;
+    return sum + final * item.qty;
+  }, 0);
+
+  // ✅ PLACE ORDER
+  const placeOrder = async () => {
+    if (cart.length === 0) return;
+
+    const orderId = Date.now();
+
+    await addDoc(collection(db, "orders"), {
+      orderId,
+      items: cart,
+      status: "Placed",
+      createdAt: new Date(),
+    });
+
+    setCart([]);
+    alert("Order Placed ✅");
+  };
+
+  const Card = ({ item }: any) => {
+    const cartItem = cart.find((i) => i.id === item.id);
+
+    const price = Number(item.price) || 0;
+    const discount = Number(item.discount) || 0;
+    const final = Math.round(
+      price - (price * discount) / 100
+    );
+
+    return (
+      <div className="bg-white rounded-2xl shadow p-2">
+        <div className="relative">
+          <img
+            src={item.image}
+            className="w-full h-44 object-cover rounded-xl"
+          />
+          {discount > 0 && (
+            <div className="absolute top-1 left-1 bg-orange-500 text-white text-[10px] px-1 rounded">
+              {discount}% OFF
+            </div>
+          )}
+        </div>
+
+        <p className="font-semibold text-xs mt-2">
+          {item.name}
+        </p>
+
+        <p className="text-[10px] text-gray-500">
+          ⭐ {item.rating} • {item.time} min
+        </p>
+
+        <p className="text-[10px] text-gray-500 line-clamp-2">
+          {item.description}
+        </p>
+
+        <div className="flex justify-between items-center mt-2">
+          <div>
+            <span className="font-bold text-black text-sm">
+              ₹{final}
+            </span>
+            <span className="text-[10px] line-through text-gray-400 ml-1">
+              ₹{price}
+            </span>
+          </div>
+
+          {cartItem ? (
+            <div className="flex items-center gap-1 bg-red-500 text-white px-2 py-1 rounded text-xs">
+              <button onClick={() => updateQty(item.id, "dec")}>-</button>
+              <span>{cartItem.qty}</span>
+              <button onClick={() => updateQty(item.id, "inc")}>+</button>
+            </div>
+          ) : (
+            <button
+              onClick={() => addToCart(item)}
+              className="bg-gradient-to-r from-red-500 to-orange-500 text-white px-2 py-1 rounded text-[10px]"
+            >
+              Add
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="bg-gray-100 min-h-screen pb-28">
+
+      {/* HEADER */}
+      <div className="p-3 bg-gradient-to-r from-red-500 to-orange-500 text-white">
+        <div className="flex items-center gap-2">
+          <div>
+            <h1 className="text-2xl font-bold">🍴 RamKesar</h1>
+            <p className="text-[10px] italic font-semibold">
+              Swad Jo Dil Jeet le
+            </p>
+          </div>
+
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search items..."
+            className="flex-1 p-2 rounded-full text-black text-sm"
+          />
+
+          <button className="bg-white text-red-500 px-3 py-1 rounded-full text-xs">
+            Login
+          </button>
+        </div>
+      </div>
+
+      {/* ADS */}
+      <div className="p-3">
+        <img
+          src={ads[currentAd]?.image}
+          className="w-full h-52 object-cover rounded-2xl"
+        />
+      </div>
+
+     {/* FILTER */}
+      <div className="flex gap-2 px-3 pb-3 overflow-x-auto">
+        {["All","Snacks","Sweets","Drinks","TopRated","TopSold"].map((f) => (
+          <button
+            key={f}
+            onClick={() => setFilter(f)}
+            className={`px-3 py-1 rounded-full text-xs ${
+              filter === f
+                ? "bg-gradient-to-r from-red-500 to-orange-500 text-white"
+                : "bg-white"
+            }`}
+          >
+            {f}
+          </button>
+        ))}
+      </div>
+
+      {/* ITEMS */}
+      <div className="px-3 grid grid-cols-3 gap-2">
+        {filteredItems.map((item) => (
+          <Card key={item.id} item={item} />
+        ))}
+      </div>
+
+      {/* CART BAR */}
+      {cart.length > 0 && (
+        <div className="fixed bottom-12 left-3 right-3 bg-black text-white p-3 rounded-xl flex justify-between items-center">
+          <span>{cart.length} items</span>
+          <span>₹{Math.round(total)}</span>
+          <button
+            onClick={placeOrder}
+            className="bg-green-500 px-3 py-1 rounded"
+          >
+            Place Order
+          </button>
+        </div>
+      )}
+
+      {/* NAVBAR */}
+      <div className="fixed bottom-0 w-full bg-white border-t flex justify-around p-2">
+        <button className="text-red-600 font-bold">🏠</button>
+        <button>🔍</button>
+        <button>📦</button>
+        <button>👤</button>
+      </div>
+
+    </div>
+  );
+}

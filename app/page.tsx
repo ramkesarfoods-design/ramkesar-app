@@ -27,7 +27,7 @@ export default function HomePage() {
   // STATES: For Notifications
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
   const [notifications, setNotifications] = useState<any[]>([]);
-  const [dismissedNotifs, setDismissedNotifs] = useState<string[]>([]); // NEW: To handle 'X' dismiss button
+  const [dismissedNotifs, setDismissedNotifs] = useState<string[]>([]);
 
   const normalize = (str: string) => str?.toLowerCase().replace(/\s/g, "");
 
@@ -50,6 +50,10 @@ export default function HomePage() {
     } else {
         detectRealLocation();
     }
+
+    // 4. Recover Dismissed Notifications (Persists across reloads)
+    const savedDismissed = localStorage.getItem("rk_dismissed_notifs");
+    if (savedDismissed) setDismissedNotifs(JSON.parse(savedDismissed));
 
     // REAL-TIME FETCHING: "Turant" updates for Menus, Ads, and Store Status
     const unsubMenus = onSnapshot(collection(db, "menus"), (snap) => {
@@ -74,6 +78,15 @@ export default function HomePage() {
     };
   }, []);
 
+  // Save dismissed notifications to strictly hide them forever
+  useEffect(() => {
+    localStorage.setItem("rk_dismissed_notifs", JSON.stringify(dismissedNotifs));
+  }, [dismissedNotifs]);
+
+  useEffect(() => {
+    localStorage.setItem("rk_cart", JSON.stringify(cart));
+  }, [cart]);
+
   // REAL-TIME Notifications based on User's Phone & "all" target
   useEffect(() => {
     if (!user?.phone) {
@@ -81,18 +94,21 @@ export default function HomePage() {
       return;
     }
 
-    // Request Notification Permission for Mobile/Desktop Browser Push
-    if ("Notification" in window && Notification.permission !== "granted" && Notification.permission !== "denied") {
-      Notification.requestPermission();
-    }
-
     const unsubNotifications = onSnapshot(collection(db, "clientUpdate"), (snap) => {
       const allUpdates = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       
-      // 1. Filter: specific phone number OR "all"
-      const filtered = allUpdates.filter((n: any) => n.target === "all" || n.target === user.phone);
+      const filtered = allUpdates.filter((n: any) => {
+        // Condition 1: Target matches
+        const isTarget = n.target === "all" || n.target === user.phone;
+        
+        // Condition 2: Created AFTER user logged in
+        const nTime = n.createdAt?.seconds ? n.createdAt.seconds * 1000 : (new Date(n.createdAt).getTime() || 0);
+        const isAfterLogin = user.loginTime ? nTime > user.loginTime : true;
+        
+        return isTarget && isAfterLogin;
+      });
       
-      // 2. Sort: Latest first (createdAt)
+      // Sort: Latest first (createdAt)
       filtered.sort((a: any, b: any) => {
         const timeA = a.createdAt?.seconds ? a.createdAt.seconds : (new Date(a.createdAt).getTime() / 1000 || 0);
         const timeB = b.createdAt?.seconds ? b.createdAt.seconds : (new Date(b.createdAt).getTime() / 1000 || 0);
@@ -100,14 +116,19 @@ export default function HomePage() {
       });
 
       setNotifications((prev) => {
-        // 3. Detect New Update to trigger Sound & Push Notification
+        // Detect New Update to trigger Sound, Vibration & Push Notification
         if (prev.length > 0 && filtered.length > 0 && filtered[0].id !== prev[0].id) {
           
           // Play Working Ringtone/Bell Sound
           try {
-            const audio = new Audio("https://cdn.pixabay.com/download/audio/2021/08/04/audio_0625c1539c.mp3"); // High quality notification ringtone
+            const audio = new Audio("https://cdn.pixabay.com/download/audio/2021/08/04/audio_0625c1539c.mp3");
             audio.play().catch((e) => console.log("Audio blocked by browser:", e));
           } catch (err) {}
+
+          // Mobile Vibration
+          if (typeof navigator !== "undefined" && navigator.vibrate) {
+            navigator.vibrate([200, 100, 200]);
+          }
 
           // Send Mobile/Browser Push Notification
           if ("Notification" in window && Notification.permission === "granted") {
@@ -127,10 +148,6 @@ export default function HomePage() {
 
     return () => unsubNotifications();
   }, [user]);
-
-  useEffect(() => {
-    localStorage.setItem("rk_cart", JSON.stringify(cart));
-  }, [cart]);
 
   useEffect(() => {
     if (ads.length === 0) return;
@@ -166,7 +183,13 @@ export default function HomePage() {
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if (loginForm.name && loginForm.phone) {
-      const userData = { name: loginForm.name, phone: loginForm.phone };
+      // Prompt for Mobile Notification Permission on Login Click
+      if ("Notification" in window && Notification.permission !== "granted") {
+        Notification.requestPermission();
+      }
+      
+      // Save loginTime to strictly filter out old notifications
+      const userData = { name: loginForm.name, phone: loginForm.phone, loginTime: Date.now() };
       setUser(userData);
       localStorage.setItem("rk_user", JSON.stringify(userData));
       setIsLoginOpen(false);
@@ -195,7 +218,7 @@ export default function HomePage() {
     return sum + (p - (p * d) / 100) * item.qty;
   }, 0);
 
-  // Active notifications to show (removes the ones user clicked 'X' on)
+  // Active notifications to show (removes the ones user clicked 'X' on permanently)
   const activeNotifications = notifications.filter(n => !dismissedNotifs.includes(n.id));
 
   return (
@@ -216,7 +239,17 @@ export default function HomePage() {
 
           <div className="flex items-center gap-2">
             {/* Green Notification Bell */}
-            <button onClick={() => user ? setIsNotificationOpen(true) : setIsLoginOpen(true)} className="relative p-2 bg-white/20 rounded-full text-white border border-white/10 active:scale-95 transition-all">
+            <button 
+              onClick={() => {
+                if (user) {
+                  setIsNotificationOpen(true);
+                  if ("Notification" in window && Notification.permission !== "granted") Notification.requestPermission();
+                } else {
+                  setIsLoginOpen(true);
+                }
+              }} 
+              className="relative p-2 bg-white/20 rounded-full text-white border border-white/10 active:scale-95 transition-all"
+            >
               <Bell size={18} />
               {activeNotifications.length > 0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-green-400 rounded-full animate-ping"></span>}
               {activeNotifications.length > 0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full"></span>}
@@ -353,11 +386,10 @@ export default function HomePage() {
         )}
       </AnimatePresence>
 
-      {/* NOTIFICATIONS MODAL (Updated Design & Bigger Size) */}
+      {/* NOTIFICATIONS MODAL */}
       <AnimatePresence>
         {isNotificationOpen && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/70 backdrop-blur-md z-[100] flex items-center justify-center p-4 md:p-6">
-            {/* UPDATED: Changed from max-w-sm to max-w-md and increased max-h */}
             <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} className="bg-white w-full max-w-md rounded-[40px] p-8 relative shadow-2xl flex flex-col max-h-[85vh]">
               <button onClick={() => setIsNotificationOpen(false)} className="absolute right-6 top-6 text-gray-300 hover:text-red-500 transition-colors"><X size={24}/></button>
               <h2 className="text-2xl font-black italic mb-2 text-red-600">Updates</h2>
@@ -374,7 +406,6 @@ export default function HomePage() {
                         <p className="text-[13px] font-black text-gray-800 mb-1 leading-tight">{n.title || "RamKesar Update"}</p>
                         <p className="text-[11px] text-gray-500 leading-snug">{n.message || "You have a new notification."}</p>
                       </div>
-                      {/* UPDATED: Changed to an "X" button to clear the notification */}
                       <button 
                         onClick={() => setDismissedNotifs(prev => [...prev, n.id])} 
                         className="shrink-0 w-7 h-7 bg-white rounded-full flex items-center justify-center shadow-sm border border-gray-200 text-gray-400 hover:text-red-500 hover:border-red-200 active:scale-90 transition-all"

@@ -1,9 +1,9 @@
 "use client";
 import { useEffect, useState } from "react";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase/config";
 import { motion, AnimatePresence } from "framer-motion";
-import { MapPin, Search, ShoppingBag, User, X, ChevronRight, Star, Clock } from "lucide-react";
+import { MapPin, Search, ShoppingBag, User, X, ChevronRight, Star, Clock, Bell } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 export default function HomePage() {
@@ -20,6 +20,14 @@ export default function HomePage() {
   const [user, setUser] = useState<any>(null);
   const [address, setAddress] = useState("Detecting location...");
   const [loginForm, setLoginForm] = useState({ name: "", phone: "" });
+  
+  // STATE: For Store Status
+  const [isStoreOpen, setIsStoreOpen] = useState(true);
+
+  // STATES: For Notifications
+  const [isNotificationOpen, setIsNotificationOpen] = useState(false);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [dismissedNotifs, setDismissedNotifs] = useState<string[]>([]); // NEW: To handle 'X' dismiss button
 
   const normalize = (str: string) => str?.toLowerCase().replace(/\s/g, "");
 
@@ -43,16 +51,82 @@ export default function HomePage() {
         detectRealLocation();
     }
 
-    const fetchData = async () => {
-      try {
-        const menuSnap = await getDocs(collection(db, "menus"));
-        const adsSnap = await getDocs(collection(db, "ads"));
-        setItems(menuSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
-        setAds(adsSnap.docs.map((doc) => doc.data()));
-      } catch (e) { console.error(e); }
+    // REAL-TIME FETCHING: "Turant" updates for Menus, Ads, and Store Status
+    const unsubMenus = onSnapshot(collection(db, "menus"), (snap) => {
+      setItems(snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
+    });
+
+    const unsubAds = onSnapshot(collection(db, "ads"), (snap) => {
+      setAds(snap.docs.map((doc) => doc.data()));
+    });
+
+    const unsubStore = onSnapshot(collection(db, "storeStatus"), (snap) => {
+      if (!snap.empty) {
+        const statusDoc = snap.docs[0].data();
+        setIsStoreOpen(statusDoc.StoreOpen !== false && statusDoc.StoreOpen !== "false");
+      }
+    });
+
+    return () => {
+      unsubMenus();
+      unsubAds();
+      unsubStore();
     };
-    fetchData();
   }, []);
+
+  // REAL-TIME Notifications based on User's Phone & "all" target
+  useEffect(() => {
+    if (!user?.phone) {
+      setNotifications([]);
+      return;
+    }
+
+    // Request Notification Permission for Mobile/Desktop Browser Push
+    if ("Notification" in window && Notification.permission !== "granted" && Notification.permission !== "denied") {
+      Notification.requestPermission();
+    }
+
+    const unsubNotifications = onSnapshot(collection(db, "clientUpdate"), (snap) => {
+      const allUpdates = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      
+      // 1. Filter: specific phone number OR "all"
+      const filtered = allUpdates.filter((n: any) => n.target === "all" || n.target === user.phone);
+      
+      // 2. Sort: Latest first (createdAt)
+      filtered.sort((a: any, b: any) => {
+        const timeA = a.createdAt?.seconds ? a.createdAt.seconds : (new Date(a.createdAt).getTime() / 1000 || 0);
+        const timeB = b.createdAt?.seconds ? b.createdAt.seconds : (new Date(b.createdAt).getTime() / 1000 || 0);
+        return timeB - timeA;
+      });
+
+      setNotifications((prev) => {
+        // 3. Detect New Update to trigger Sound & Push Notification
+        if (prev.length > 0 && filtered.length > 0 && filtered[0].id !== prev[0].id) {
+          
+          // Play Working Ringtone/Bell Sound
+          try {
+            const audio = new Audio("https://cdn.pixabay.com/download/audio/2021/08/04/audio_0625c1539c.mp3"); // High quality notification ringtone
+            audio.play().catch((e) => console.log("Audio blocked by browser:", e));
+          } catch (err) {}
+
+          // Send Mobile/Browser Push Notification
+          if ("Notification" in window && Notification.permission === "granted") {
+            const notif = new Notification("RamKesar", {
+              body: filtered[0].message || "Naya update aaya hai!",
+              icon: "/favicon.ico"
+            });
+            notif.onclick = () => {
+              window.focus();
+              setIsNotificationOpen(true);
+            };
+          }
+        }
+        return filtered;
+      });
+    });
+
+    return () => unsubNotifications();
+  }, [user]);
 
   useEffect(() => {
     localStorage.setItem("rk_cart", JSON.stringify(cart));
@@ -96,7 +170,6 @@ export default function HomePage() {
       setUser(userData);
       localStorage.setItem("rk_user", JSON.stringify(userData));
       setIsLoginOpen(false);
-      router.push("/profile"); // Redirect after login
     }
   };
 
@@ -108,11 +181,22 @@ export default function HomePage() {
     }
   };
 
+  const handleCheckoutClick = () => {
+    if (user) {
+      router.push("/cart");
+    } else {
+      setIsLoginOpen(true);
+    }
+  };
+
   const total = cart.reduce((sum, item) => {
     const p = Number(item.price);
     const d = Number(item.discount) || 0;
     return sum + (p - (p * d) / 100) * item.qty;
   }, 0);
+
+  // Active notifications to show (removes the ones user clicked 'X' on)
+  const activeNotifications = notifications.filter(n => !dismissedNotifs.includes(n.id));
 
   return (
     <div className="bg-slate-50 min-h-screen pb-32 font-sans select-none overflow-x-hidden">
@@ -130,10 +214,19 @@ export default function HomePage() {
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search for food..." className="w-full pl-10 pr-3 py-2 rounded-full text-sm outline-none bg-white text-black" />
           </div>
 
-          <button onClick={handleProfileClick} className="flex items-center gap-2 bg-white/20 px-4 py-2 rounded-full text-white border border-white/10 active:scale-95 transition-all">
-            <User size={18} />
-            {user ? <span className="text-xs font-black uppercase">{user.name.split(' ')[0]}</span> : <span className="text-xs font-black">LOGIN</span>}
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Green Notification Bell */}
+            <button onClick={() => user ? setIsNotificationOpen(true) : setIsLoginOpen(true)} className="relative p-2 bg-white/20 rounded-full text-white border border-white/10 active:scale-95 transition-all">
+              <Bell size={18} />
+              {activeNotifications.length > 0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-green-400 rounded-full animate-ping"></span>}
+              {activeNotifications.length > 0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full"></span>}
+            </button>
+
+            <button onClick={handleProfileClick} className="flex items-center gap-2 bg-white/20 px-4 py-2 rounded-full text-white border border-white/10 active:scale-95 transition-all">
+              <User size={18} />
+              {user ? <span className="text-xs font-black uppercase">{user.name.split(' ')[0]}</span> : <span className="text-xs font-black">LOGIN</span>}
+            </button>
+          </div>
         </div>
         <div className="mt-3 md:hidden relative">
           <Search className="absolute left-3 top-2.5 text-gray-400" size={14} />
@@ -186,13 +279,15 @@ export default function HomePage() {
 
         {/* ITEMS GRID */}
         <div className="px-4 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4 mt-6">
-          {items.filter(i => (filter === "All" || normalize(i.category) === normalize(filter)) && normalize(i.name).includes(normalize(search))).map((item) => {
+          {items.filter(i => (filter === "All" || (filter === "TopRated" ? normalize(i.tag) === "toprated" : normalize(i.category) === normalize(filter))) && normalize(i.name).includes(normalize(search))).map((item) => {
             const cartItem = cart.find((c) => c.id === item.id);
             const disc = Number(item.discount) || 0;
             const final = Math.round(Number(item.price) - (Number(item.price) * disc) / 100);
             
+            const outOfStock = item.inStock === false || item.inStock === "false";
+            
             return (
-              <div key={item.id} className="bg-white rounded-[24px] border border-gray-100 overflow-hidden flex flex-col hover:shadow-xl transition-all group">
+              <div key={item.id} className={`rounded-[24px] border border-gray-100 overflow-hidden flex flex-col transition-all group ${!isStoreOpen ? "bg-slate-100 grayscale opacity-75" : "bg-white hover:shadow-xl"}`}>
                 <div className="relative overflow-hidden">
                   <img src={item.image} className="w-full h-52 object-cover group-hover:scale-105 transition-transform duration-500" alt={item.name} />
                   {disc > 0 && <div className="absolute top-3 left-3 bg-red-600 text-white text-[10px] font-black px-2.5 py-1 rounded-xl shadow-lg border border-white/20">{disc}% OFF</div>}
@@ -211,7 +306,12 @@ export default function HomePage() {
                       <p className="font-black text-base text-gray-900 leading-none">₹{final}</p>
                       {disc > 0 && <p className="text-[9px] text-gray-400 line-through">₹{item.price}</p>}
                     </div>
-                    {cartItem ? (
+                    
+                    {!isStoreOpen ? (
+                      <button disabled className="bg-gray-200 text-gray-400 px-3 py-2 rounded-xl text-[10px] font-black cursor-not-allowed">CLOSED</button>
+                    ) : outOfStock ? (
+                      <button disabled className="bg-gray-200 text-gray-400 px-3 py-2 rounded-xl text-[10px] font-black cursor-not-allowed text-center leading-tight">OUT OF<br/>STOCK</button>
+                    ) : cartItem ? (
                       <div className="flex items-center gap-3 bg-red-600 text-white px-3 py-1.5 rounded-xl shadow-md">
                         <button onClick={() => setCart(prev => prev.map(i => i.id === item.id ? {...i, qty: i.qty - 1} : i).filter(i => i.qty > 0))} className="font-black text-lg">-</button>
                         <span className="text-[12px] font-black">{cartItem.qty}</span>
@@ -220,6 +320,7 @@ export default function HomePage() {
                     ) : (
                       <button onClick={() => setCart([...cart, {...item, qty: 1}])} className="bg-orange-500 text-white px-5 py-2 rounded-xl text-[11px] font-black shadow-md active:scale-90 transition-all">ADD</button>
                     )}
+
                   </div>
                 </div>
               </div>
@@ -252,9 +353,46 @@ export default function HomePage() {
         )}
       </AnimatePresence>
 
+      {/* NOTIFICATIONS MODAL (Updated Design & Bigger Size) */}
+      <AnimatePresence>
+        {isNotificationOpen && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/70 backdrop-blur-md z-[100] flex items-center justify-center p-4 md:p-6">
+            {/* UPDATED: Changed from max-w-sm to max-w-md and increased max-h */}
+            <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} className="bg-white w-full max-w-md rounded-[40px] p-8 relative shadow-2xl flex flex-col max-h-[85vh]">
+              <button onClick={() => setIsNotificationOpen(false)} className="absolute right-6 top-6 text-gray-300 hover:text-red-500 transition-colors"><X size={24}/></button>
+              <h2 className="text-2xl font-black italic mb-2 text-red-600">Updates</h2>
+              <p className="text-[11px] font-bold text-gray-400 mb-6 uppercase tracking-widest">Your Notifications</p>
+              
+              <div className="overflow-y-auto space-y-3 no-scrollbar pb-4 flex-1">
+                {activeNotifications.length === 0 ? (
+                  <p className="text-xs text-gray-400 text-center py-10 font-bold">No new updates yet.</p>
+                ) : (
+                  activeNotifications.map((n) => (
+                    <div key={n.id} className="bg-slate-50 p-4 rounded-2xl border border-gray-100 relative overflow-hidden flex items-center justify-between gap-3 group">
+                      <div className="absolute left-0 top-0 bottom-0 w-1 bg-green-500"></div>
+                      <div className="flex-1 pl-2">
+                        <p className="text-[13px] font-black text-gray-800 mb-1 leading-tight">{n.title || "RamKesar Update"}</p>
+                        <p className="text-[11px] text-gray-500 leading-snug">{n.message || "You have a new notification."}</p>
+                      </div>
+                      {/* UPDATED: Changed to an "X" button to clear the notification */}
+                      <button 
+                        onClick={() => setDismissedNotifs(prev => [...prev, n.id])} 
+                        className="shrink-0 w-7 h-7 bg-white rounded-full flex items-center justify-center shadow-sm border border-gray-200 text-gray-400 hover:text-red-500 hover:border-red-200 active:scale-90 transition-all"
+                      >
+                        <X size={14}/>
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* CHECKOUT POPUP */}
       {cart.length > 0 && (
-        <div onClick={() => router.push("/cart")} className="fixed bottom-6 left-4 right-4 bg-black text-white p-4 rounded-[32px] shadow-[0_20px_50px_rgba(0,0,0,0.3)] z-[60] flex justify-between items-center max-w-md mx-auto cursor-pointer active:scale-95 transition-all border border-white/10 group">
+        <div onClick={handleCheckoutClick} className="fixed bottom-10 left-4 right-4 bg-black text-white p-4 rounded-[32px] shadow-[0_20px_50px_rgba(0,0,0,0.3)] z-[60] flex justify-between items-center max-w-md mx-auto cursor-pointer active:scale-95 transition-all border border-white/10 group">
           <div className="flex items-center gap-4">
             <div className="bg-red-600 p-3 rounded-2xl shadow-lg animate-pulse group-hover:scale-110 transition-transform"><ShoppingBag size={22}/></div>
             <div>

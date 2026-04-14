@@ -46,11 +46,11 @@ export default function CartPage() {
     return parseFloat((R * c).toFixed(2));
   }, []);
 
-  // 🛰️ Live Location Fetcher
+  // 🛰️ Live Location Fetcher (Improved with strict accuracy params)
   const fetchLiveLocation = useCallback(async () => {
     setIsLocating(true);
     if (!navigator.geolocation) {
-      alert("Geolocation not supported");
+      alert("Geolocation not supported by your browser");
       setIsLocating(false);
       return;
     }
@@ -65,9 +65,15 @@ export default function CartPage() {
         setSelectedAddress(addr);
         setDistance(calculateDistance(latitude, longitude));
         localStorage.setItem("rk_address", JSON.stringify({ text: addr, lat: latitude, lon: longitude }));
-      } catch (e) { console.error("Geocoding failed"); }
+      } catch (e) { 
+        console.error("Geocoding failed"); 
+        alert("Failed to fetch address details. Please search manually.");
+      }
       setIsLocating(false);
-    }, () => setIsLocating(false), { enableHighAccuracy: true });
+    }, (err) => {
+      setIsLocating(false);
+      alert("Location access denied or timeout! Please enable GPS or search manually.");
+    }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
   }, [calculateDistance]);
 
   useEffect(() => {
@@ -139,16 +145,50 @@ export default function CartPage() {
     }
 
     const historyObj = isObj ? { text: finalAddr, lat: addrData.lat, lon: addrData.lon } : { text: finalAddr };
-    const updatedHistory = [historyObj, ...recentAddresses.filter(a => (a.text || a) !== finalAddr)].slice(0, 3);
+    // ✅ Max 8 addresses tak store karega
+    const updatedHistory = [historyObj, ...recentAddresses.filter(a => (a.text || a) !== finalAddr)].slice(0, 8);
     setRecentAddresses(updatedHistory);
     localStorage.setItem("rk_address_history", JSON.stringify(updatedHistory));
   };
 
-  // 🧮 Delivery Calc (Discounted Price Logic)
+  // 🧮 Delivery Calc (Discounted Price Logic + Bulk Order Charge)
   const subtotal = cart.reduce((t, i) => t + (Math.round(Number(i.price) - (Number(i.price) * (Number(i.discount) || 0) / 100)) * i.qty), 0);
-  const deliveryCharge = distance > 0 ? (distance <= 2 ? 20 : 20 + Math.ceil(distance - 2) * 8) : 0;
+  
+  // Bulk order logic: Add ₹30 extra for heavy orders ₹700 and above
+  const bulkCharge = subtotal >= 700 ? 30 : 0;
+  const deliveryCharge = distance > 0 ? (distance <= 2 ? 20 : 20 + Math.ceil(distance - 2) * 8) + bulkCharge : 0;
+  
   const totalPayable = subtotal + deliveryCharge + 5;
   const isOutOfRange = distance > 17; 
+
+  // ✅ Validations Check (Real-time Dynamic State instead of alerts)
+  let checkoutIssue = "";
+  let checkoutActionMsg = "";
+
+  if (!user || !user.phone) {
+    checkoutIssue = "Login Required";
+    checkoutActionMsg = "Please login to place your order.";
+  } else if (cart.length === 0) {
+    checkoutIssue = "Cart is Empty";
+    checkoutActionMsg = "Please add some items to your cart.";
+  } else if (subtotal < 100) {
+    checkoutIssue = "Minimum Order ₹100";
+    checkoutActionMsg = `Add items worth ₹${100 - subtotal} more to proceed.`;
+  } else if (subtotal > 1900) {
+    checkoutIssue = "Maximum Order ₹1900";
+    checkoutActionMsg = `Reduce items worth ₹${subtotal - 1900} to proceed.`;
+  } else if (!selectedAddress || distance === 0) {
+    checkoutIssue = "Address Missing";
+    checkoutActionMsg = "Please select a valid delivery address.";
+  } else if (isOutOfRange) {
+    checkoutIssue = "Out of Zone";
+    checkoutActionMsg = `Delivery limit is 17km. You are ${distance}km away.`;
+  } else if (!landmark.trim()) {
+    checkoutIssue = "Landmark Missing";
+    checkoutActionMsg = "Please enter your Flat / House No. / Landmark.";
+  }
+
+  const isBtnDisabled = checkoutIssue !== "";
 
   const handleFinalOrder = async (method: string) => {
     if (!selectedAddress || distance === 0) return alert("Select a valid address first!");
@@ -168,10 +208,10 @@ export default function CartPage() {
     try {
       await setDoc(doc(db, "orders", orderId), {
         orderId, 
-        items: finalItems, // Items with corrected discounted price
+        items: finalItems, 
         total: totalPayable, 
         deliveryFee: deliveryCharge,
-        platformFee: 5, // Added platform fee field
+        platformFee: 5, 
         status: isOnline ? "Pending" : "Confirmed",
         paymentMethod: method, 
         address: selectedAddress, 
@@ -179,13 +219,28 @@ export default function CartPage() {
         landmark, 
         instructions,
         customer: user?.phone || "Guest",
-        customerName: user?.name || "No Name", // Ye line add ki gayi hai customer name ke liye
+        customerName: user?.name || "No Name", 
         createdAt: serverTimestamp(),
       });
-      if (isOnline) window.location.href = `upi://pay?pa=8650937216@yapl&pn=RamKesar&am=${totalPayable}&cu=INR&tn=${orderId}`;
+
+      if (isOnline) {
+        // App-specific UPI Deep Links
+        let upiUrl = `upi://pay?pa=8650937216@yapl&pn=RamKesar&am=${totalPayable}&cu=INR&tn=${orderId}`;
+        if (method === "Google Pay") upiUrl = `tez://upi/pay?pa=8650937216@yapl&pn=RamKesar&am=${totalPayable}&cu=INR&tn=${orderId}`;
+        else if (method === "Paytm") upiUrl = `paytmmp://pay?pa=8650937216@yapl&pn=RamKesar&am=${totalPayable}&cu=INR&tn=${orderId}`;
+        else if (method === "PhonePe") upiUrl = `phonepe://pay?pa=8650937216@yapl&pn=RamKesar&am=${totalPayable}&cu=INR&tn=${orderId}`;
+        
+        window.location.href = upiUrl;
+      }
+      
       localStorage.removeItem("rk_cart");
+      setCart([]); // Clear cart instantly on client side
+      
       setTimeout(() => router.push(`/orders?id=${orderId}`), 4000);
-    } catch (e) { setIsProcessing(false); }
+    } catch (e) { 
+      setIsProcessing(false); 
+      alert("Something went wrong! Please try again.");
+    }
   };
 
   return (
@@ -245,12 +300,40 @@ export default function CartPage() {
             </AnimatePresence>
           </div>
 
+          {/* ✅ NAYA: Recent Address Dropdown (Sirf tab dikhega jab history ho) */}
+          {recentAddresses.length > 0 && (
+            <div className="mb-3">
+              <button 
+                onClick={() => setShowRecentDropdown(!showRecentDropdown)}
+                className="w-full bg-slate-50 p-3 rounded-xl flex items-center justify-between text-[10px] font-black text-gray-500 border border-slate-100 hover:bg-slate-100 transition-all"
+              >
+                <div className="flex items-center gap-2"><History size={14}/> Recent Addresses</div>
+                <ChevronDown size={14} className={`transition-transform ${showRecentDropdown ? 'rotate-180' : ''}`}/>
+              </button>
+              <AnimatePresence>
+                {showRecentDropdown && (
+                  <motion.div initial={{opacity:0, height:0}} animate={{opacity:1, height:'auto'}} exit={{opacity:0, height:0}} className="overflow-hidden">
+                    <div className="bg-white border border-slate-100 mt-2 rounded-xl shadow-sm overflow-hidden">
+                      {recentAddresses.map((addr, idx) => (
+                        <div key={idx} onClick={() => selectAddress(addr)} className="p-3 text-[10px] font-bold border-b last:border-0 hover:bg-slate-50 cursor-pointer flex gap-3 text-gray-600 items-center">
+                          <History size={12} className="text-slate-400 shrink-0"/> 
+                          <span className="line-clamp-1">{addr.text || addr}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 gap-3">
             <input 
               value={landmark} 
               onChange={(e) => setLandmark(e.target.value)}
-              placeholder="Flat / House No. / Landmark" 
-              className="w-full bg-slate-50 rounded-xl p-3 text-[11px] font-bold outline-none border border-transparent focus:border-slate-200"
+              placeholder="Flat / House No. / Landmark *" 
+              required
+              className={`w-full bg-slate-50 rounded-xl p-3 text-[11px] font-bold outline-none border ${landmark.length > 0 ? 'border-green-200' : 'border-slate-200 focus:border-red-200'}`}
             />
           </div>
         </div>
@@ -294,7 +377,7 @@ export default function CartPage() {
             <span>Item Total</span><span>₹{subtotal}</span>
           </div>
           <div className="flex justify-between text-[11px] font-black text-gray-400 uppercase items-center tracking-tighter">
-            <span>Delivery Fee</span>
+            <span>Delivery Fee {bulkCharge > 0 && "(Bulk)"}</span>
             <span className="text-gray-800 font-black">₹{deliveryCharge}</span>
           </div>
           <div className="flex justify-between text-[11px] font-black text-gray-400 uppercase tracking-tighter">
@@ -307,19 +390,29 @@ export default function CartPage() {
           </div>
         </div>
 
-        {isOutOfRange && (
+        {/* ✅ Dynamic Validation Warning Box - Shown right above the button */}
+        {isBtnDisabled && (
           <div className="bg-red-50 border border-red-200 text-red-600 p-4 rounded-[20px] flex items-center gap-3">
             <AlertTriangle size={20} className="shrink-0" />
-            <p className="text-[10px] font-black uppercase leading-tight">Delivery limit is 17km. You are {distance}km away.</p>
+            <div className="flex-1">
+              <p className="text-[10px] font-black uppercase leading-tight">{checkoutIssue}</p>
+              <p className="text-[10px] font-bold mt-0.5">{checkoutActionMsg}</p>
+            </div>
+            {(!user || !user.phone) && (
+              <button onClick={() => router.push('/?login=true')} className="bg-white border border-red-200 text-red-600 px-4 py-2 rounded-xl text-[9px] font-black uppercase shadow-sm active:scale-95 transition-all">
+                Login
+              </button>
+            )}
           </div>
         )}
 
+        {/* ✅ Payment Button with Dynamic Text and Disabled State */}
         <button 
-          disabled={isOutOfRange || !selectedAddress || distance === 0}
+          disabled={isBtnDisabled}
           onClick={() => setShowPaymentModal(true)} 
           className="w-full bg-black text-white p-5 rounded-[30px] font-black text-[12px] uppercase tracking-[3px] shadow-2xl disabled:bg-slate-300 disabled:shadow-none active:scale-95 transition-all flex items-center justify-center gap-3"
         >
-          {isOutOfRange ? "Out of Zone" : distance === 0 ? "Detecting..." : "Choose Payment"} <Smartphone size={18}/>
+          {isBtnDisabled ? checkoutIssue : "Choose Payment"} <Smartphone size={18}/>
         </button>
       </div>
 

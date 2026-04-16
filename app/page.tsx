@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { collection, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase/config";
 import { motion, AnimatePresence } from "framer-motion";
@@ -24,10 +24,14 @@ export default function HomePage() {
   // STATE: For Store Status
   const [isStoreOpen, setIsStoreOpen] = useState(true);
 
-  // STATES: For Notifications
+  // STATES & REFS: For Advanced Notifications
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
-  const [notifications, setNotifications] = useState<any[]>([]);
+  const [adminNotifs, setAdminNotifs] = useState<any[]>([]);
+  const [orderNotifs, setOrderNotifs] = useState<any[]>([]);
   const [dismissedNotifs, setDismissedNotifs] = useState<string[]>([]);
+  
+  const isFirstLoad = useRef(true);
+  const notifiedSet = useRef<Set<string>>(new Set());
 
   const normalize = (str: string) => str?.toLowerCase().replace(/\s/g, "");
 
@@ -51,9 +55,11 @@ export default function HomePage() {
         detectRealLocation();
     }
 
-    // 4. Recover Dismissed Notifications (Persists across reloads)
+    // 4. FIXED: Recover Dismissed Notifications strictly once to prevent reload overwrite bugs
     const savedDismissed = localStorage.getItem("rk_dismissed_notifs");
-    if (savedDismissed) setDismissedNotifs(JSON.parse(savedDismissed));
+    if (savedDismissed) {
+      setDismissedNotifs(JSON.parse(savedDismissed));
+    }
 
     // REAL-TIME FETCHING: "Turant" updates for Menus, Ads, and Store Status
     const unsubMenus = onSnapshot(collection(db, "menus"), (snap) => {
@@ -78,76 +84,127 @@ export default function HomePage() {
     };
   }, []);
 
-  // Save dismissed notifications to strictly hide them forever
-  useEffect(() => {
-    localStorage.setItem("rk_dismissed_notifs", JSON.stringify(dismissedNotifs));
-  }, [dismissedNotifs]);
-
   useEffect(() => {
     localStorage.setItem("rk_cart", JSON.stringify(cart));
   }, [cart]);
 
-  // REAL-TIME Notifications based on User's Phone & "all" target
+  // ------------------------------------------------------------------
+  // REAL-TIME LISTENER 1: Admin Client Updates
+  // ------------------------------------------------------------------
   useEffect(() => {
     if (!user?.phone) {
-      setNotifications([]);
+      setAdminNotifs([]);
       return;
     }
 
-    const unsubNotifications = onSnapshot(collection(db, "clientUpdate"), (snap) => {
+    const unsubAdmin = onSnapshot(collection(db, "clientUpdate"), (snap) => {
       const allUpdates = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      
       const filtered = allUpdates.filter((n: any) => {
-        // Condition 1: Target matches
-        const isTarget = n.target === "all" || n.target === user.phone;
+        const targetStr = String(n.target || "").trim().toLowerCase();
+        const phoneStr = String(user.phone || "").trim().toLowerCase();
+        const isTarget = targetStr === "all" || targetStr === phoneStr;
         
-        // Condition 2: Created AFTER user logged in
+        // Ensure it's strictly AFTER user logged in
         const nTime = n.createdAt?.seconds ? n.createdAt.seconds * 1000 : (new Date(n.createdAt).getTime() || 0);
-        const isAfterLogin = user.loginTime ? nTime > user.loginTime : true;
+        const isAfterLogin = user.loginTime && nTime ? nTime >= (user.loginTime - 5000) : true;
         
         return isTarget && isAfterLogin;
       });
-      
-      // Sort: Latest first (createdAt)
-      filtered.sort((a: any, b: any) => {
-        const timeA = a.createdAt?.seconds ? a.createdAt.seconds : (new Date(a.createdAt).getTime() / 1000 || 0);
-        const timeB = b.createdAt?.seconds ? b.createdAt.seconds : (new Date(b.createdAt).getTime() / 1000 || 0);
-        return timeB - timeA;
-      });
-
-      setNotifications((prev) => {
-        // Detect New Update to trigger Sound, Vibration & Push Notification
-        if (prev.length > 0 && filtered.length > 0 && filtered[0].id !== prev[0].id) {
-          
-          // Play Working Ringtone/Bell Sound
-          try {
-            const audio = new Audio("https://cdn.pixabay.com/download/audio/2021/08/04/audio_0625c1539c.mp3");
-            audio.play().catch((e) => console.log("Audio blocked by browser:", e));
-          } catch (err) {}
-
-          // Mobile Vibration
-          if (typeof navigator !== "undefined" && navigator.vibrate) {
-            navigator.vibrate([200, 100, 200]);
-          }
-
-          // Send Mobile/Browser Push Notification
-          if ("Notification" in window && Notification.permission === "granted") {
-            const notif = new Notification("RamKesar", {
-              body: filtered[0].message || "Naya update aaya hai!",
-              icon: "/favicon.ico"
-            });
-            notif.onclick = () => {
-              window.focus();
-              setIsNotificationOpen(true);
-            };
-          }
-        }
-        return filtered;
-      });
+      setAdminNotifs(filtered);
     });
 
-    return () => unsubNotifications();
+    return () => unsubAdmin();
   }, [user]);
+
+  // ------------------------------------------------------------------
+  // REAL-TIME LISTENER 2: Order Status Flow Updates (Success, Out for Delivery, etc.)
+  // ------------------------------------------------------------------
+  useEffect(() => {
+    if (!user?.phone) {
+      setOrderNotifs([]);
+      return;
+    }
+
+    const unsubOrders = onSnapshot(collection(db, "orders"), (snap) => {
+      const myOrders = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+                                .filter(o => String(o.phone).trim() === String(user.phone).trim());
+      
+      const newOrderNotifs: any[] = [];
+      myOrders.forEach(o => {
+        if (o.status) {
+          const nTime = o.updatedAt?.seconds ? o.updatedAt.seconds * 1000 : 
+                       (o.createdAt?.seconds ? o.createdAt.seconds * 1000 : (new Date(o.createdAt).getTime() || 0));
+          
+          const isAfterLogin = user.loginTime && nTime ? nTime >= (user.loginTime - 5000) : true;
+
+          if (isAfterLogin) {
+            newOrderNotifs.push({
+              id: `${o.id}_${o.status}`, // New ID generates automatically when status changes
+              title: `Order Update`,
+              message: `Your order is now: ${String(o.status).toUpperCase()}`,
+              createdAt: o.updatedAt || o.createdAt || { seconds: Date.now() / 1000 }
+            });
+          }
+        }
+      });
+      setOrderNotifs(newOrderNotifs);
+    });
+
+    return () => unsubOrders();
+  }, [user]);
+
+  // COMBINE AND SORT ALL NOTIFICATIONS
+  const allNotifications = [...adminNotifs, ...orderNotifs].sort((a: any, b: any) => {
+    const timeA = a.createdAt?.seconds ? a.createdAt.seconds : (new Date(a.createdAt).getTime() / 1000 || 0);
+    const timeB = b.createdAt?.seconds ? b.createdAt.seconds : (new Date(b.createdAt).getTime() / 1000 || 0);
+    return timeB - timeA;
+  });
+
+  const activeNotifications = allNotifications.filter(n => !dismissedNotifs.includes(n.id));
+
+  // ------------------------------------------------------------------
+  // NOTIFICATION BUZZ, VIBRATION & PUSH LOGIC (Combined)
+  // ------------------------------------------------------------------
+  useEffect(() => {
+    if (activeNotifications.length === 0) return;
+
+    // Prevent buzzing on initial refresh/load
+    if (isFirstLoad.current) {
+      activeNotifications.forEach(n => notifiedSet.current.add(n.id));
+      isFirstLoad.current = false;
+      return;
+    }
+
+    const newNotifs = activeNotifications.filter(n => !notifiedSet.current.has(n.id));
+    
+    if (newNotifs.length > 0) {
+      newNotifs.forEach(n => notifiedSet.current.add(n.id)); // Mark as notified immediately
+      
+      // Play Audio Ringtone
+      try {
+        const audio = new Audio("https://cdn.pixabay.com/download/audio/2021/08/04/audio_0625c1539c.mp3");
+        audio.play().catch(e => console.log("Audio blocked:", e));
+      } catch (err) {}
+
+      // Mobile Vibrate
+      if (typeof navigator !== "undefined" && navigator.vibrate) {
+        navigator.vibrate([200, 100, 200]);
+      }
+
+      // Browser / Mobile Push Notification
+      if ("Notification" in window && Notification.permission === "granted") {
+        const notif = new Notification("RamKesar Update", {
+          body: newNotifs[0].message || "Naya update aaya hai!",
+          icon: "/favicon.ico"
+        });
+        
+        notif.onclick = () => {
+          window.focus();
+          setIsNotificationOpen(true);
+        };
+      }
+    }
+  }, [activeNotifications]);
 
   useEffect(() => {
     if (ads.length === 0) return;
@@ -218,9 +275,6 @@ export default function HomePage() {
     return sum + (p - (p * d) / 100) * item.qty;
   }, 0);
 
-  // Active notifications to show (removes the ones user clicked 'X' on permanently)
-  const activeNotifications = notifications.filter(n => !dismissedNotifs.includes(n.id));
-
   return (
     <div className="bg-slate-50 min-h-screen pb-32 font-sans select-none overflow-x-hidden">
       
@@ -269,7 +323,7 @@ export default function HomePage() {
 
       <div className="max-w-6xl mx-auto">
         {/* LOCATION BOX */}
-        <div onClick={detectRealLocation} className="bg-white p-3 px-4 flex items-center gap-2 border-b cursor-pointer sticky top-[115px] md:top-[75px] z-40">
+        <div onClick={detectRealLocation} className="bg-white p-3 px-4 flex items-center gap-2 border-b cursor-pointer">
           <MapPin size={16} className="text-red-600 shrink-0 animate-bounce" />
           <p className="text-[11px] font-bold text-gray-800 truncate flex-1">{address}</p>
           <ChevronRight size={14} className="text-gray-400" />
@@ -301,8 +355,8 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* CATEGORIES */}
-        <div className="flex gap-2 px-4 py-2 overflow-x-auto no-scrollbar">
+        {/* CATEGORIES - Normal flow below ads, sticks seamlessly under search bar on scroll */}
+        <div className="sticky top-[116px] md:top-[72px] z-[45] bg-slate-50/95 backdrop-blur-md py-3 px-4 flex gap-2 overflow-x-auto no-scrollbar border-b border-gray-200/50 shadow-sm transition-all duration-300">
           {["All", "Snacks", "Sweets", "Drinks", "TopRated"].map((f) => (
             <button key={f} onClick={() => setFilter(f)} className={`px-6 py-2.5 rounded-full text-[11px] font-black transition-all whitespace-nowrap ${filter === f ? "bg-red-600 text-white shadow-md scale-105" : "bg-white border text-gray-500"}`}>
               {f}
@@ -320,7 +374,7 @@ export default function HomePage() {
             const outOfStock = item.inStock === false || item.inStock === "false";
             
             return (
-              <div key={item.id} className={`rounded-[24px] border border-gray-100 overflow-hidden flex flex-col transition-all group ${!isStoreOpen ? "bg-slate-100 grayscale opacity-75" : "bg-white hover:shadow-xl"}`}>
+              <div key={item.id} className={`rounded-[24px] border border-gray-100 overflow-hidden flex flex-col transition-all group ${(!isStoreOpen || outOfStock) ? "bg-slate-100 grayscale opacity-75" : "bg-white hover:shadow-xl"}`}>
                 <div className="relative overflow-hidden">
                   <img src={item.image} className="w-full h-52 object-cover group-hover:scale-105 transition-transform duration-500" alt={item.name} />
                   {disc > 0 && <div className="absolute top-3 left-3 bg-red-600 text-white text-[10px] font-black px-2.5 py-1 rounded-xl shadow-lg border border-white/20">{disc}% OFF</div>}
@@ -406,8 +460,18 @@ export default function HomePage() {
                         <p className="text-[13px] font-black text-gray-800 mb-1 leading-tight">{n.title || "RamKesar Update"}</p>
                         <p className="text-[11px] text-gray-500 leading-snug">{n.message || "You have a new notification."}</p>
                       </div>
+                      
+                      {/* FIXED: 'X' Button safely and permanently stores the removed ID to local storage */}
                       <button 
-                        onClick={() => setDismissedNotifs(prev => [...prev, n.id])} 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDismissedNotifs(prev => {
+                            if (prev.includes(n.id)) return prev;
+                            const next = [...prev, n.id];
+                            localStorage.setItem("rk_dismissed_notifs", JSON.stringify(next));
+                            return next;
+                          });
+                        }} 
                         className="shrink-0 w-7 h-7 bg-white rounded-full flex items-center justify-center shadow-sm border border-gray-200 text-gray-400 hover:text-red-500 hover:border-red-200 active:scale-90 transition-all"
                       >
                         <X size={14}/>

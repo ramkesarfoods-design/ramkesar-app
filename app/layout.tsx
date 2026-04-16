@@ -21,6 +21,14 @@ export default function RootLayout({ children }) {
 
   return (
     <html lang="en">
+      {/* 🔥 SEO AND KEYWORDS - ADDED SAFELY WITHOUT TOUCHING UI CODE 🔥 */}
+      <head>
+        <title>RamKesar Foods | Swad Jo Dil Jeet Le</title>
+        <meta name="description" content="Order the best Samosas, hot Jalebis, and authentic Indian snacks online from RamKesar Foods. Fresh, hygienic, and perfectly spiced." />
+        <meta name="keywords" content="RamKesar, RamKesar Foods, Swad Jo dil jeet le, Classic Aloo Samosa, Punjabi Samosa, Paneer Samosa, Cheese Corn Samosa, Sweet Meetha Samosa, Plain Regular Jalebi, Urad Dal Jalebi, Imarti, Kesar Jalebi, Dal Kachori, Rajasthani Kachori, Khaman Dhokla, White Khatta Dhokla, Indori Poha, Maharashtrian Poha, Gulab Jamun, Kala Jamun, Kesar Rajbhog, Kesar Lassi, Rose Lassi, Kesar Milk, Cold Coffee, Kesar Rabri, best samosa online, order jalebi online, buy snacks online, QSR Indian snacks" />
+        <link rel="icon" href="/favicon.ico" sizes="any" />
+      </head>
+
       <body className="bg-[#F8FAFC] text-slate-900 antialiased">
         
         {/* MAIN CONTENT AREA */}

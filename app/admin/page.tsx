@@ -12,7 +12,7 @@ import {
   Search, Bell, LogOut, Plus, Edit3, Trash2, 
   Phone, Settings, Monitor, Power, Image as ImageIcon,
   Volume2, VolumeX, ChevronRight, Activity, ShieldCheck, Moon, Sun, AlertTriangle, Printer, FileText, Lock,
-  BarChart3, History, PieChart, MessageSquare, Calendar, RefreshCw, Eye, Send, ClipboardList, Star
+  BarChart3, History, PieChart, MessageSquare, Calendar, RefreshCw, Eye, Send, ClipboardList, Star, Webhook
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -47,6 +47,7 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   
   const [storeStatus, setStoreStatus] = useState(false);
+  const [webhookUrl, setWebhookUrl] = useState(""); 
   const [soundType, setSoundType] = useState("bell1"); 
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [isDarkMode, setIsDarkMode] = useState(false);
@@ -146,8 +147,9 @@ export default function AdminDashboard() {
     const unsubStore = onSnapshot(doc(db, "storeStatus", "main"), (docSnap) => {
       if (docSnap.exists()) {
         setStoreStatus(docSnap.data().StoreOpen);
+        if(docSnap.data().webhookUrl) setWebhookUrl(docSnap.data().webhookUrl);
       } else {
-        setDoc(doc(db, "storeStatus", "main"), { StoreOpen: false }, { merge: true });
+        setDoc(doc(db, "storeStatus", "main"), { StoreOpen: false, webhookUrl: "" }, { merge: true });
       }
     });
 
@@ -212,6 +214,15 @@ export default function AdminDashboard() {
       console.error("Failed to sync store status", error);
       setStoreStatus(!newStatus); 
     }
+  };
+
+  const handleWebhookSave = async (url: string) => {
+      try {
+          await setDoc(doc(db, "storeStatus", "main"), { webhookUrl: url }, { merge: true });
+          alert("Webhook Saved Successfully!");
+      } catch (error) {
+          alert("Failed to save Webhook.");
+      }
   };
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -400,12 +411,57 @@ export default function AdminDashboard() {
     });
   }, [orders, orderFilter, searchTerm]);
 
+  const pushToGoogleSheet = async (orderData: any) => {
+      if (!webhookUrl) return;
+
+      const itemsTotal = orderData.items?.reduce((acc:any, i:any) => acc + (Number(i.price) * Number(i.qty)), 0) || 0;
+      const grandTotal = itemsTotal + PLATFORM_FEE + (Number(orderData.deliveryFee) || 0);
+      
+      const customerName = typeof orderData.customer === 'object' ? orderData.customer.name : (orderData.customerName || "Customer");
+      
+      let customerPhone = "N/A";
+      if (typeof orderData.customer === 'object' && orderData.customer?.phone) customerPhone = orderData.customer.phone;
+      else if (orderData.phone) customerPhone = orderData.phone;
+      else if (typeof orderData.customer === 'string' && /\d/.test(orderData.customer)) customerPhone = orderData.customer; 
+      
+      let customerAddress = "N/A";
+      if (typeof orderData.customer === 'object' && orderData.customer?.address) customerAddress = orderData.customer.address;
+      else if (orderData.address) customerAddress = orderData.address;
+
+      const payload = {
+          orderId: orderData.id,
+          date: new Date().toLocaleString(),
+          name: customerName,
+          phone: customerPhone,
+          address: customerAddress, 
+          amount: grandTotal
+      };
+
+      try {
+          fetch(webhookUrl, {
+              method: 'POST',
+              mode: 'no-cors',
+              headers: { 'Content-Type': 'text/plain' },
+              body: JSON.stringify(payload)
+          }).catch(() => {});
+      } catch (error) {
+          console.log("Silent webhook execution");
+      }
+  };
+
   const updateStatus = async (orderId: string, newStatus: string, riderId?: string) => {
     setProcessingOrders((prev: any) => ({...prev, [orderId]: true}));
     try {
       const updateData: any = { status: newStatus, updatedAt: Timestamp.now() };
       if (riderId) updateData.assignedRider = riderId;
       await updateDoc(doc(db, "orders", orderId), updateData);
+
+      if (newStatus === "Preparing") {
+          const acceptedOrder = orders.find(o => o.id === orderId);
+          if (acceptedOrder) {
+              pushToGoogleSheet(acceptedOrder);
+          }
+      }
 
       if (newStatus === "Out for Delivery" && riderId) {
           const fullOrder = orders.find(o => o.id === orderId);
@@ -1248,6 +1304,28 @@ export default function AdminDashboard() {
                             )}
                         </div>
 
+                        {/* NEW: WEBHOOK INTEGRATION */}
+                        <div className="p-7 bg-slate-50 rounded-[2.5rem] space-y-4">
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <p className="font-black italic uppercase text-sm text-slate-900 flex items-center gap-2"><Webhook size={16} className="text-blue-500"/> Marketing Integration</p>
+                                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Connect Google Sheet / CRM Webhook</p>
+                                </div>
+                            </div>
+                            <div className="flex gap-2 pt-2">
+                                <input 
+                                    type="url" 
+                                    value={webhookUrl} 
+                                    onChange={(e) => setWebhookUrl(e.target.value)} 
+                                    placeholder="https://script.google.com/macros/s/..." 
+                                    className="flex-1 bg-white p-3 rounded-xl text-[10px] font-bold border border-slate-200 outline-none text-slate-900"
+                                />
+                                <button onClick={() => handleWebhookSave(webhookUrl)} className="bg-blue-600 text-white px-5 rounded-xl font-black text-[10px] uppercase italic hover:bg-blue-700 transition-all shadow-sm">
+                                    Save Link
+                                </button>
+                            </div>
+                        </div>
+
                         <div className="flex items-center justify-between p-7 bg-slate-50 rounded-[2.5rem]">
                             <div><p className="font-black italic uppercase text-sm text-slate-900">Alert Bell Logic</p><p className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Choose notification sound</p></div>
                             <select 
@@ -1292,15 +1370,24 @@ export default function AdminDashboard() {
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
                 <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0, y: 20 }} className="bg-white p-10 rounded-[3rem] w-[500px] shadow-2xl relative border border-slate-100">
                     <button onClick={() => setShowItemModal(false)} className="absolute top-8 right-8 p-2 bg-slate-50 rounded-full text-slate-400 hover:text-red-500 transition-all"><XCircle size={24} /></button>
-                    <h2 className="text-2xl font-black italic uppercase tracking-tighter text-slate-900 mb-8">{editingItem ? "Update Recipe" : "Add New Dish"}</h2>
+                    
+                    <div className="flex justify-between items-center mb-8">
+                        <h2 className="text-2xl font-black italic uppercase tracking-tighter text-slate-900">{editingItem ? "Update Recipe" : "Add New Dish"}</h2>
+                    </div>
                     
                     <form onSubmit={async (e: any) => {
                         e.preventDefault();
                         const fd = new FormData(e.target);
+                        
+                        let assignedTag = "";
+                        const currentRating = Number(fd.get("rating"));
+                        if (currentRating > 4.3) assignedTag = "topRated";
+
                         const data: any = {
                           ...Object.fromEntries(fd.entries()),
                           price: Number(fd.get("price")),
                           discount: Number(fd.get("discount")),
+                          tag: assignedTag,
                           inStock: editingItem ? editingItem.inStock : true
                         };
                         
@@ -1319,8 +1406,13 @@ export default function AdminDashboard() {
                         <input name="description" defaultValue={editingItem?.description} placeholder="Short Description" className="w-full bg-slate-50 p-4 rounded-2xl text-[11px] font-bold outline-none border focus:border-red-100 text-slate-900" required />
                         
                         <div className="grid grid-cols-2 gap-4">
-                            <input name="prepTime" defaultValue={editingItem?.prepTime} placeholder="Prep Time (mins)" className="w-full bg-slate-50 p-4 rounded-2xl text-[11px] font-bold outline-none border focus:border-red-100 text-slate-900" required />
-                            <input name="image" defaultValue={editingItem?.image} placeholder="Image URL" className="w-full bg-slate-50 p-4 rounded-2xl text-[11px] font-bold outline-none border focus:border-red-100 text-slate-900" required />
+                            <select name="category" defaultValue={editingItem?.category || ""} className="w-full bg-slate-50 p-4 rounded-2xl text-[11px] font-bold outline-none border focus:border-red-100 text-slate-900 cursor-pointer" required>
+                                <option value="" disabled>Select Category</option>
+                                <option value="snacks">Snacks</option>
+                                <option value="sweets">Sweets</option>
+                                <option value="drinks">Drinks</option>
+                            </select>
+                            <input name="time" defaultValue={editingItem?.time || editingItem?.prepTime} placeholder="Prep Time (mins)" className="w-full bg-slate-50 p-4 rounded-2xl text-[11px] font-bold outline-none border focus:border-red-100 text-slate-900" required />
                         </div>
 
                         <div className="grid grid-cols-2 gap-4">
@@ -1328,8 +1420,31 @@ export default function AdminDashboard() {
                             <input name="discount" type="number" defaultValue={editingItem?.discount || 0} placeholder="Discount (%)" className="w-full bg-slate-50 p-4 rounded-2xl text-[11px] font-bold outline-none border focus:border-red-100 text-slate-900" />
                         </div>
                         
-                        <input name="rating" defaultValue={editingItem?.rating || "4.5"} placeholder="Initial Rating Display" className="w-full bg-slate-50 p-4 rounded-2xl text-[11px] font-bold outline-none border focus:border-red-100 text-slate-900" />
-                        <button className="w-full bg-red-600 text-white py-5 rounded-2xl font-black text-[11px] uppercase italic shadow-xl shadow-red-100 active:scale-95 transition-all mt-4">{editingItem ? "Push Update" : "Deploy to Menu"}</button>
+                        <div className="grid grid-cols-2 gap-4">
+                            <input name="image" defaultValue={editingItem?.image} placeholder="Image URL" className="w-full bg-slate-50 p-4 rounded-2xl text-[11px] font-bold outline-none border focus:border-red-100 text-slate-900" required />
+                            <input name="rating" type="number" step="0.1" defaultValue={editingItem?.rating || "4.5"} placeholder="Rating (e.g. 4.5)" className="w-full bg-slate-50 p-4 rounded-2xl text-[11px] font-bold outline-none border focus:border-red-100 text-slate-900" />
+                        </div>
+                        <p className="text-[8px] font-bold text-slate-400 italic px-2">Note: Rating {'>'} 4.3 will auto-apply 'topRated' tag.</p>
+
+                        <div className="flex gap-3 mt-4">
+                            {editingItem && (
+                                <button 
+                                    type="button"
+                                    onClick={() => {
+                                        if(window.confirm("Are you sure you want to permanently delete this dish?")) {
+                                            deleteDoc(doc(db, "menus", editingItem.id));
+                                            setShowItemModal(false);
+                                        }
+                                    }} 
+                                    className="w-1/3 bg-red-50 text-red-600 border border-red-100 py-5 rounded-2xl font-black text-[11px] uppercase italic hover:bg-red-100 active:scale-95 transition-all"
+                                >
+                                    Delete
+                                </button>
+                            )}
+                            <button type="submit" className="flex-1 bg-red-600 text-white py-5 rounded-2xl font-black text-[11px] uppercase italic shadow-xl shadow-red-100 active:scale-95 transition-all">
+                                {editingItem ? "Push Update" : "Deploy to Menu"}
+                            </button>
+                        </div>
                     </form>
                 </motion.div>
             </motion.div>

@@ -344,7 +344,8 @@ export default function HomePage() {
           >
             {ads.map((ad, i) => (
               <div key={i} className="w-full shrink-0 px-1">
-                <img src={ad.image} className="w-full h-56 md:h-[400px] object-cover rounded-3xl shadow-lg border border-gray-100" alt="Special Offer" />
+                {/* CHANGED: h-56 md:h-[400px] replaced with aspect-[2/1] */}
+                <img src={ad.image} className="w-full aspect-[2/1] object-contain bg-white rounded-3xl shadow-lg border border-gray-100" alt="Special Offer" />
               </div>
             ))}
           </motion.div>
@@ -365,7 +366,8 @@ export default function HomePage() {
         </div>
 
         {/* ITEMS GRID */}
-        <div className="px-4 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4 mt-6">
+        {/* CHANGED: grid-cols-2 to grid-cols-3 for mobile view */}
+        <div className="px-4 grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 mt-6">
           {items.filter(i => (filter === "All" || (filter === "TopRated" ? normalize(i.tag) === "toprated" : normalize(i.category) === normalize(filter))) && normalize(i.name).includes(normalize(search))).map((item) => {
             const cartItem = cart.find((c) => c.id === item.id);
             const disc = Number(item.discount) || 0;
@@ -376,7 +378,8 @@ export default function HomePage() {
             return (
               <div key={item.id} className={`rounded-[24px] border border-gray-100 overflow-hidden flex flex-col transition-all group ${(!isStoreOpen || outOfStock) ? "bg-slate-100 grayscale opacity-75" : "bg-white hover:shadow-xl"}`}>
                 <div className="relative overflow-hidden">
-                  <img src={item.image} className="w-full h-52 object-cover group-hover:scale-105 transition-transform duration-500" alt={item.name} />
+                  {/* CHANGED: h-52 to aspect-square to make the image 4x4 (perfect square) */}
+                  <img src={item.image} className="w-full aspect-square object-cover group-hover:scale-105 transition-transform duration-500" alt={item.name} />
                   {disc > 0 && <div className="absolute top-3 left-3 bg-red-600 text-white text-[10px] font-black px-2.5 py-1 rounded-xl shadow-lg border border-white/20">{disc}% OFF</div>}
                 </div>
                 <div className="p-4 flex-1 flex flex-col">

@@ -344,7 +344,6 @@ export default function HomePage() {
           >
             {ads.map((ad, i) => (
               <div key={i} className="w-full shrink-0 px-1">
-                {/* CHANGED: h-56 md:h-[400px] replaced with aspect-[2/1] */}
                 <img src={ad.image} className="w-full aspect-[2/1] object-contain bg-white rounded-3xl shadow-lg border border-gray-100" alt="Special Offer" />
               </div>
             ))}
@@ -366,8 +365,8 @@ export default function HomePage() {
         </div>
 
         {/* ITEMS GRID */}
-        {/* CHANGED: grid-cols-2 to grid-cols-3 for mobile view */}
-        <div className="px-4 grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 mt-6">
+        {/* CHANGED: grid-cols-3 to grid-cols-2 as per new request for better mobile view */}
+        <div className="px-4 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4 mt-6">
           {items.filter(i => (filter === "All" || (filter === "TopRated" ? normalize(i.tag) === "toprated" : normalize(i.category) === normalize(filter))) && normalize(i.name).includes(normalize(search))).map((item) => {
             const cartItem = cart.find((c) => c.id === item.id);
             const disc = Number(item.discount) || 0;
@@ -378,20 +377,24 @@ export default function HomePage() {
             return (
               <div key={item.id} className={`rounded-[24px] border border-gray-100 overflow-hidden flex flex-col transition-all group ${(!isStoreOpen || outOfStock) ? "bg-slate-100 grayscale opacity-75" : "bg-white hover:shadow-xl"}`}>
                 <div className="relative overflow-hidden">
-                  {/* CHANGED: h-52 to aspect-square to make the image 4x4 (perfect square) */}
                   <img src={item.image} className="w-full aspect-square object-cover group-hover:scale-105 transition-transform duration-500" alt={item.name} />
                   {disc > 0 && <div className="absolute top-3 left-3 bg-red-600 text-white text-[10px] font-black px-2.5 py-1 rounded-xl shadow-lg border border-white/20">{disc}% OFF</div>}
                 </div>
-                <div className="p-4 flex-1 flex flex-col">
+                
+                {/* CHANGED: Reduced padding (p-4 to p-2.5) to decrease height */}
+                <div className="p-2.5 flex-1 flex flex-col">
                   <h3 className="font-black text-[13px] text-gray-800 truncate">{item.name}</h3>
-                  <p className="text-[10px] text-gray-400 line-clamp-2 my-1.5 h-7 leading-tight">{item.description || "Freshly prepared with authentic flavors."}</p>
+                  {/* CHANGED: Reduced margin and height to save space */}
+                  <p className="text-[10px] text-gray-400 line-clamp-2 my-1 h-6 leading-tight">{item.description || "Freshly prepared with authentic flavors."}</p>
                   
-                  <div className="flex items-center gap-3 text-[10px] font-bold text-gray-400 mb-3">
+                  {/* CHANGED: Reduced bottom margin (mb-3 to mb-2) */}
+                  <div className="flex items-center gap-3 text-[10px] font-bold text-gray-400 mb-2">
                     <span className="flex items-center gap-0.5 text-orange-500"><Star size={12} fill="currentColor"/> {item.rating}</span>
                     <span className="flex items-center gap-0.5"><Clock size={12}/> {item.time}m</span>
                   </div>
 
-                  <div className="flex justify-between items-center pt-3 border-t border-gray-50 mt-auto">
+                  {/* CHANGED: Reduced top padding (pt-3 to pt-2) */}
+                  <div className="flex justify-between items-center pt-2 border-t border-gray-50 mt-auto">
                     <div>
                       <p className="font-black text-base text-gray-900 leading-none">₹{final}</p>
                       {disc > 0 && <p className="text-[9px] text-gray-400 line-through">₹{item.price}</p>}
@@ -464,7 +467,6 @@ export default function HomePage() {
                         <p className="text-[11px] text-gray-500 leading-snug">{n.message || "You have a new notification."}</p>
                       </div>
                       
-                      {/* FIXED: 'X' Button safely and permanently stores the removed ID to local storage */}
                       <button 
                         onClick={(e) => {
                           e.stopPropagation();

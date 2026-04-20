@@ -1,4 +1,4 @@
-k"use client";
+"use client";
 
 import "./globals.css";
 import { usePathname, useRouter } from "next/navigation";

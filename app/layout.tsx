@@ -1,9 +1,10 @@
-"use client";
+k"use client";
 
 import "./globals.css";
 import { usePathname, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Home, ClipboardList, UserCircle2 } from "lucide-react";
+import InstallPopup from "./InstallPopup";
 
 export default function RootLayout({ children }) {
   const pathname = usePathname();
@@ -38,6 +39,7 @@ export default function RootLayout({ children }) {
         
         {/* MAIN CONTENT AREA */}
         <div className={`min-h-screen transition-all duration-300 ${showNavbar ? "pb-20 md:pb-24" : ""}`}>
+          <InstallPopup />
           {children}
         </div>
 

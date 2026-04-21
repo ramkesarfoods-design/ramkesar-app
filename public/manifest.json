@@ -1,4 +1,5 @@
 {
+  "id": "/?source=pwa",
   "name": "RamKesar Foods",
   "short_name": "RamKesar",
   "description": "The Pride Of Indian Taste - Professional Food Delivery",
@@ -9,13 +10,13 @@
   "orientation": "portrait",
   "icons": [
     {
-      "src": "/icon.png",
+      "src": "/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "/icon.png",
+      "src": "/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
@@ -23,14 +24,14 @@
   ],
   "screenshots": [
     {
-      "src": "/icon.png",
-      "sizes": "512x512",
+      "src": "/screen-narrow.png",
+      "sizes": "1080x1920",
       "type": "image/png",
       "form_factor": "narrow"
     },
     {
-      "src": "/icon.png",
-      "sizes": "512x512",
+      "src": "/screen-wide.png",
+      "sizes": "1920x1080",
       "type": "image/png",
       "form_factor": "wide"
     }

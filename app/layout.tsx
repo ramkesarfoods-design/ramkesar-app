@@ -24,14 +24,18 @@ export default function RootLayout({ children }) {
     <html lang="en">
       {/* 🔥 SEO AND KEYWORDS - ADDED SAFELY WITHOUT TOUCHING UI CODE 🔥 */}
       <head>
-        <title>RamKesar Foods | Swad Jo Dil Jeet Le</title>
+        <title>RamKesar Foods | The Pride Of Indian Taste</title>
         <meta name="description" content="Order the best Samosas, hot Jalebis, and authentic Indian snacks online from RamKesar Foods. Fresh, hygienic, and perfectly spiced." />
-        <meta name="keywords" content="RamKesar, RamKesar Foods, Swad Jo dil jeet le, Classic Aloo Samosa, Punjabi Samosa, Paneer Samosa, Cheese Corn Samosa, Sweet Meetha Samosa, Plain Regular Jalebi, Urad Dal Jalebi, Imarti, Kesar Jalebi, Dal Kachori, Rajasthani Kachori, Khaman Dhokla, White Khatta Dhokla, Indori Poha, Maharashtrian Poha, Gulab Jamun, Kala Jamun, Kesar Rajbhog, Kesar Lassi, Rose Lassi, Kesar Milk, Cold Coffee, Kesar Rabri, best samosa online, order jalebi online, buy snacks online, QSR Indian snacks" />
+        <meta name="keywords" content="RamKesar, RamKesar Foods, The Pride Of Indian Taste, Classic Aloo Samosa, Punjabi Samosa, Paneer Samosa, Cheese Corn Samosa, Sweet Meetha Samosa, Plain Regular Jalebi, Urad Dal Jalebi, Imarti, Kesar Jalebi, Dal Kachori, Rajasthani Kachori, Khaman Dhokla, White Khatta Dhokla, Indori Poha, Maharashtrian Poha, Gulab Jamun, Kala Jamun, Kesar Rajbhog, Kesar Lassi, Rose Lassi, Kesar Milk, Cold Coffee, Kesar Rabri, best samosa online, order jalebi online, buy snacks online, QSR Indian snacks" />
         <link rel="icon" href="/favicon.ico" sizes="any" />
         
+        {/* 🔥 EDGE-TO-EDGE FULLSCREEN & NOTCH SUPPORT 🔥 */}
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
         {/* 🔥 PWA MANIFEST & APP ICONS ADDED HERE 🔥 */}
         <link rel="manifest" href="/manifest.json" />
-        <meta name="theme-color" content="#ff5722" />
+        <meta name="theme-color" content="#F8FAFC" />
         <link rel="apple-touch-icon" href="/icon.png" />
       </head>
 

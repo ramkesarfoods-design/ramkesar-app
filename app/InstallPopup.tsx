@@ -9,21 +9,16 @@ export default function InstallPopup() {
   const [showPopup, setShowPopup] = useState(false);
 
   useEffect(() => {
-    // Service Worker Register (Google ki requirement)
+    // Service Worker Register
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js').catch(err => console.log(err));
     }
 
-    // Install event ko pakadna
     const handleBeforeInstallPrompt = (e: any) => {
       e.preventDefault();
       setDeferredPrompt(e);
-      
-      // Check karna ki kya user ne pehle 'X' toh nahi dabaya tha
-      const hasDismissed = localStorage.getItem("ramkesarAppDismissed");
-      if (!hasDismissed) {
-        setShowPopup(true);
-      }
+      // 🔥 LocalStorage check hata diya! Ab site khulne par popup hamesha aayega jab tak app install na ho.
+      setShowPopup(true);
     };
 
     window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
@@ -42,7 +37,7 @@ export default function InstallPopup() {
 
   const handleDismiss = () => {
     setShowPopup(false);
-    localStorage.setItem("ramkesarAppDismissed", "true"); // User ko dobara tang nahi karega
+    // User ne X dabaya toh is session ke liye hatega, background se hata kar fir kholne pe wapas aayega!
   };
 
   return (
@@ -61,7 +56,7 @@ export default function InstallPopup() {
             </div>
             <div>
               <h3 className="font-extrabold text-slate-800 text-sm tracking-tight">RamKesar App</h3>
-              <p className="text-[10px] md:text-[11px] text-slate-500 font-semibold leading-tight">Install for fast ordering!</p>
+              <p className="text-[10px] md:text-[11px] text-slate-500 font-semibold leading-tight">The Pride Of Indian Taste</p>
             </div>
           </div>
           
@@ -70,7 +65,7 @@ export default function InstallPopup() {
               onClick={handleInstall}
               className="bg-red-600 hover:bg-red-700 text-white text-[11px] font-black px-4 py-2.5 rounded-full active:scale-95 transition-all shadow-md shadow-red-200"
             >
-              INSTALL
+              OPEN APP
             </button>
             <button 
               onClick={handleDismiss}

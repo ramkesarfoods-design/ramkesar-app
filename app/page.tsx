@@ -193,7 +193,7 @@ export default function HomePage() {
 
       // Browser / Mobile Push Notification
       if ("Notification" in window && Notification.permission === "granted") {
-        const notif = new Notification("RamKesar Update", {
+        const notif = new Notification("RamKesar Notification", {
           body: newNotifs[0].message || "Naya update aaya hai!",
           icon: "/favicon.ico"
         });
@@ -283,7 +283,7 @@ export default function HomePage() {
         <div className="max-w-6xl mx-auto flex items-center justify-between gap-4">
           <div className="w-40 shrink-0">
             <h1 className="text-2xl font-black text-white italic tracking-tighter">RamKesar</h1>
-            <p className="text-[10px] text-white font-bold italic opacity-90">Swad Jo Dil Jeet Le</p>
+            <p className="text-[10px] text-white font-bold italic opacity-90">The Pride Of Indian Taste</p>
           </div>
 
           <div className="relative flex-1 hidden md:block">
@@ -425,7 +425,7 @@ export default function HomePage() {
       {/* FOOTER */}
       <footer className="mt-20 py-12 text-center bg-white border-t border-gray-100">
         <p className="text-[11px] font-black text-gray-400 uppercase tracking-[3px] mb-2">RamKesar Foods</p>
-        <p className="text-[9px] font-bold text-gray-300">© 2026 All Rights Reserved. Swad Jo Dil Jeet Le.</p>
+        <p className="text-[9px] font-bold text-gray-300">© 2026 All Rights Reserved. The Pride Of Indian Taste.</p>
       </footer>
 
       {/* LOGIN MODAL */}
@@ -463,7 +463,7 @@ export default function HomePage() {
                     <div key={n.id} className="bg-slate-50 p-4 rounded-2xl border border-gray-100 relative overflow-hidden flex items-center justify-between gap-3 group">
                       <div className="absolute left-0 top-0 bottom-0 w-1 bg-green-500"></div>
                       <div className="flex-1 pl-2">
-                        <p className="text-[13px] font-black text-gray-800 mb-1 leading-tight">{n.title || "RamKesar Update"}</p>
+                        <p className="text-[13px] font-black text-gray-800 mb-1 leading-tight">{n.title || "RamKesar Notification"}</p>
                         <p className="text-[11px] text-gray-500 leading-snug">{n.message || "You have a new notification."}</p>
                       </div>
                       

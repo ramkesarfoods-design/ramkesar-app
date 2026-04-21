@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "in.co.ramkesar.twa",
+        "sha256_cert_fingerprints": ["E1:18:96:3D:45:9D:DF:C7:19:E4:1B:93:D4:1C:13:24:83:52:56:F5:3C:BA:EE:03:AE:9D:A0:48:99:8A:00:F3"]
+      }
+    }]

@@ -35,11 +35,11 @@ export default function RootLayout({ children }) {
 
         {/* 🔥 PWA MANIFEST & APP ICONS ADDED HERE 🔥 */}
         <link rel="manifest" href="/manifest.json" />
-        <meta name="theme-color" content="#F8FAFC" />
+        <meta name="theme-color" content="#E60000" />
         <link rel="apple-touch-icon" href="/icon.png" />
       </head>
 
-      <body className="bg-[#F8FAFC] text-slate-900 antialiased">
+      <body className="bg-[#E60000] text-slate-900 antialiased">
         
         {/* MAIN CONTENT AREA */}
         <div className={`min-h-screen transition-all duration-300 ${showNavbar ? "pb-20 md:pb-24" : ""}`}>
@@ -109,3 +109,4 @@ export default function RootLayout({ children }) {
     </html>
   );
 }
+
